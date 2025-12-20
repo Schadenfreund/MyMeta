@@ -1,0 +1,42 @@
+name: Build Windows App
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Enable Desktop Support
+        run: flutter config --enable-windows-desktop
+
+      - name: Get Dependencies
+        run: flutter pub get
+        working-directory: ./simpler_filebot
+
+      - name: Build Windows Release
+        run: flutter build windows --release
+        working-directory: ./simpler_filebot
+
+      - name: Compress Build Artifacts
+        run: Compress-Archive -Path simpler_filebot\build\windows\runner\Release\* -DestinationPath simpler_filebot_windows.zip
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-build
+          path: simpler_filebot_windows.zip
