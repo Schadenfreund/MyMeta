@@ -3,12 +3,13 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:provider/provider.dart';
-import 'dart:io';
 import '../services/settings_service.dart';
 import '../services/file_state_service.dart';
 import '../backend/media_record.dart';
 import '../backend/match_result.dart';
 import '../widgets/inline_metadata_editor.dart';
+import '../theme/app_theme.dart';
+import '../utils/snackbar_helper.dart';
 import 'package:path/path.dart' as p;
 
 class RenamerPage extends StatefulWidget {
@@ -26,7 +27,40 @@ class _RenamerPageState extends State<RenamerPage> {
         await FilePicker.platform.pickFiles(allowMultiple: true);
     if (result != null) {
       List<XFile> xFiles = result.paths.map((path) => XFile(path!)).toList();
-      context.read<FileStateService>().addFiles(xFiles);
+      final fileState = context.read<FileStateService>();
+      final settings = context.read<SettingsService>();
+      await fileState.addFiles(xFiles, settings: settings);
+
+      // Show snackbar with results
+      if (context.mounted && fileState.lastAddResult != null) {
+        final addResult = fileState.lastAddResult!;
+        final added = addResult['added'] ?? 0;
+        final withMetadata = addResult['withMetadata'] ?? 0;
+        final ffmpegMissing = (addResult['ffmpegMissing'] ?? 0) > 0;
+
+        if (added > 0) {
+          String message = 'Added $added file${added > 1 ? 's' : ''}';
+          if (withMetadata > 0) {
+            message += ' ($withMetadata with existing metadata)';
+          }
+
+          SnackbarHelper.showSuccess(context, message);
+
+          // Show additional warning if FFmpeg is missing
+          if (ffmpegMissing && added > withMetadata) {
+            Future.delayed(const Duration(milliseconds: 800), () {
+              if (context.mounted) {
+                SnackbarHelper.showWarning(
+                  context,
+                  'FFmpeg not found. Configure in Settings → FFmpeg to read embedded metadata.',
+                );
+              }
+            });
+          }
+        }
+
+        fileState.clearLastAddResult();
+      }
     }
   }
 
@@ -36,165 +70,337 @@ class _RenamerPageState extends State<RenamerPage> {
     });
   }
 
+  // Handle drag and drop with snackbar
+  Future<void> _handleDragDrop(BuildContext context, List<XFile> files) async {
+    final fileState = context.read<FileStateService>();
+    final settings = context.read<SettingsService>();
+    await fileState.addFiles(files, settings: settings);
+
+    // Show snackbar with results
+    if (context.mounted && fileState.lastAddResult != null) {
+      final addResult = fileState.lastAddResult!;
+      final added = addResult['added'] ?? 0;
+      final withMetadata = addResult['withMetadata'] ?? 0;
+      final ffmpegMissing = (addResult['ffmpegMissing'] ?? 0) > 0;
+
+      if (added > 0) {
+        String message = 'Added $added file${added > 1 ? 's' : ''}';
+        if (withMetadata > 0) {
+          message += ' ($withMetadata with existing metadata)';
+        }
+
+        SnackbarHelper.showSuccess(context, message);
+
+        // Show FFmpeg warning if needed
+        if (ffmpegMissing && added > withMetadata) {
+          Future.delayed(const Duration(milliseconds: 800), () {
+            if (context.mounted) {
+              SnackbarHelper.showWarning(
+                context,
+                'FFmpeg not found. Configure in Settings → FFmpeg to read embedded metadata.',
+              );
+            }
+          });
+        }
+      }
+
+      fileState.clearLastAddResult();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final fileState = context.watch<FileStateService>();
     final settings = context.watch<SettingsService>();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Column(
+    final hasFiles = fileState.inputFiles.isNotEmpty;
+    final hasUnrenamedFiles = fileState.inputFiles.any((f) => !f.isRenamed);
+    final canRename =
+        hasFiles && fileState.matchResults.isNotEmpty && hasUnrenamedFiles;
+
+    return Stack(
       children: [
-        // Toolbar - Clean & Integrated
-        Padding(
-          padding: const EdgeInsets.all(20),
+        // Main content - Full screen list
+        DropTarget(
+          onDragDone: (detail) => _handleDragDrop(context, detail.files),
+          child: ListView.builder(
+            padding: const EdgeInsets.only(
+              left: AppSpacing.md,
+              right: AppSpacing.md,
+              top: AppSpacing.md,
+              bottom: 80, // Extra padding for floating buttons
+            ),
+            itemCount: fileState.inputFiles.length + 1, // +1 for add button
+            itemBuilder: (context, index) {
+              // Add Files Card (Inline)
+              if (index == fileState.inputFiles.length) {
+                return _buildAddFilesCard(context, isDark);
+              }
+
+              final input = fileState.inputFiles[index];
+              MatchResult? output;
+              if (index < fileState.matchResults.length) {
+                output = fileState.matchResults[index];
+              }
+
+              bool isRenamed = input.isRenamed;
+              bool isExpanded = _expandedIndex == index;
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: _buildFileCard(
+                  context,
+                  index,
+                  input,
+                  output,
+                  isRenamed,
+                  isExpanded,
+                  fileState,
+                ),
+              );
+            },
+          ),
+        ),
+
+        // Floating Action Buttons (bottom right) - only when files exist
+        if (hasFiles && !fileState.isLoading)
+          Positioned(
+            right: AppSpacing.md,
+            bottom: AppSpacing.md,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Clear All Button
+                _buildMinimalIconButton(
+                  context,
+                  icon: Icons.delete_outline,
+                  tooltip: 'Clear All',
+                  onPressed: () {
+                    setState(() => _expandedIndex = null);
+                    fileState.clearAll();
+                  },
+                  isDark: isDark,
+                  isDestructive: true,
+                ),
+
+                // Rename All Button - only if there are files to rename
+                if (canRename) ...[
+                  const SizedBox(width: 8),
+                  _buildMinimalIconButton(
+                    context,
+                    icon: Icons.drive_file_rename_outline,
+                    tooltip: 'Rename All',
+                    onPressed: () {
+                      setState(() => _expandedIndex = null);
+                      final settings = context.read<SettingsService>();
+                      fileState.renameFiles(settings: settings);
+                    },
+                    isDark: isDark,
+                    isPrimary: true,
+                    accentColor: settings.accentColor,
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+        // Processing indicator
+        if (fileState.isLoading)
+          Positioned(
+            right: AppSpacing.md,
+            bottom: AppSpacing.md,
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: settings.accentColor.withAlpha(100),
+                ),
+                boxShadow:
+                    isDark ? AppTheme.darkCardShadow : AppTheme.lightCardShadow,
+              ),
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    settings.accentColor,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+        // Loading Overlay when adding files
+        if (fileState.isAddingFiles)
+          Positioned.fill(
+            child: Container(
+              color: (isDark
+                      ? AppColors.darkBackground
+                      : AppColors.lightBackground)
+                  .withAlpha(200),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 24,
+                  ),
+                  decoration: BoxDecoration(
+                    color:
+                        isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: isDark
+                        ? AppTheme.darkCardShadow
+                        : AppTheme.lightCardShadow,
+                    border: Border.all(
+                      color: settings.accentColor.withAlpha(75),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            settings.accentColor,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Loading files...',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Reading metadata',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: isDark
+                                  ? AppColors.darkTextSecondary
+                                  : AppColors.lightTextSecondary,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Builds a minimal icon button for the floating action area
+  Widget _buildMinimalIconButton(
+    BuildContext context, {
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    required bool isDark,
+    bool isPrimary = false,
+    bool isDestructive = false,
+    Color? accentColor,
+  }) {
+    final Color buttonColor = isPrimary
+        ? (accentColor ?? Theme.of(context).colorScheme.primary)
+        : (isDestructive
+            ? AppColors.lightDanger
+            : (isDark
+                ? AppColors.darkTextSecondary
+                : AppColors.lightTextSecondary));
+
+    final Color bgColor = isPrimary
+        ? buttonColor
+        : (isDark ? AppColors.darkSurface : AppColors.lightSurface);
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        elevation: isPrimary ? 2 : 1,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: isPrimary
+                  ? null
+                  : Border.all(
+                      color:
+                          isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                    ),
+            ),
+            child: Icon(
+              icon,
+              size: 20,
+              color: isPrimary ? Colors.white : buttonColor,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Inline Add Files Card
+  Widget _buildAddFilesCard(BuildContext context, bool isDark) {
+    return Card(
+      elevation: 0,
+      color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppDimensions.cardBorderRadius),
+        side: BorderSide(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          width: 1,
+          style: BorderStyle.solid,
+        ),
+      ),
+      child: InkWell(
+        onTap: () => _pickFiles(context),
+        borderRadius: BorderRadius.circular(AppDimensions.cardBorderRadius),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
           child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Primary Actions
-              ElevatedButton.icon(
-                onPressed: () => _pickFiles(context),
-                icon: const Icon(Icons.add_circle_outline, size: 20),
-                label: const Text("Add Files"),
+              Icon(
+                Icons.add_circle_outline,
+                size: 24,
+                color: Theme.of(context).colorScheme.primary,
               ),
-
-              if (fileState.isLoading)
-                const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else ...[
-                ElevatedButton.icon(
-                  onPressed: fileState.inputFiles.isEmpty
-                      ? null
-                      : () => fileState.matchFiles(settings),
-                  icon: const Icon(Icons.search),
-                  label: const Text("Match"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.secondary,
-                  ),
-                ),
-              ],
-              const SizedBox(width: 12),
-              ElevatedButton.icon(
-                onPressed: (!fileState.isLoading &&
-                        fileState.inputFiles.isNotEmpty &&
-                        fileState.matchResults.isNotEmpty &&
-                        !fileState.inputFiles.every((f) => f.isRenamed))
-                    ? () {
-                        setState(() => _expandedIndex = null);
-                        fileState.renameFiles();
-                      }
-                    : null,
-                icon: const Icon(Icons.drive_file_rename_outline, size: 20),
-                label: const Text("Rename Files"),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                "Add Files",
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
               ),
-
-              const Spacer(),
-
-              // Secondary Actions
-              if (fileState.canUndo) ...[
-                OutlinedButton.icon(
-                  onPressed: () {
-                    setState(() => _expandedIndex = null);
-                    fileState.undo();
-                  },
-                  icon: const Icon(Icons.undo, size: 18),
-                  label: const Text("Undo"),
-                ),
-                const SizedBox(width: 8),
-              ],
-              if (fileState.inputFiles.any((f) => f.isRenamed)) ...[
-                TextButton.icon(
-                  onPressed: () {
-                    setState(() => _expandedIndex = null);
-                    fileState.clearRenamedFiles();
-                  },
-                  icon: const Icon(Icons.check_circle, size: 18),
-                  label: const Text("Clear Finished"),
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF10B981),
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              if (fileState.inputFiles.isNotEmpty)
-                TextButton.icon(
-                  onPressed: () => fileState.clearAll(),
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  label: const Text("Clear All"),
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.red.shade400,
-                  ),
-                ),
+              const SizedBox(width: AppSpacing.xs),
+              Text(
+                "or drop here",
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: isDark
+                          ? AppColors.darkTextTertiary
+                          : AppColors.lightTextTertiary,
+                    ),
+              ),
             ],
           ),
         ),
-
-        // Main List
-        Expanded(
-          child: DropTarget(
-            onDragDone: (detail) {
-              context.read<FileStateService>().addFiles(detail.files);
-            },
-            child: fileState.inputFiles.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.file_upload_outlined,
-                          size: 64,
-                          color: Colors.grey.shade400,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          "Drop files here or click Add Files",
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: Colors.grey.shade600,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          "Supported formats: MP4, MKV",
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey.shade500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: fileState.inputFiles.length,
-                    itemBuilder: (context, index) {
-                      final input = fileState.inputFiles[index];
-                      MatchResult? output;
-                      if (index < fileState.matchResults.length) {
-                        output = fileState.matchResults[index];
-                      }
-
-                      bool isRenamed = input.isRenamed;
-                      bool isExpanded = _expandedIndex == index;
-
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _buildFileCard(
-                          context,
-                          index,
-                          input,
-                          output,
-                          isRenamed,
-                          isExpanded,
-                          fileState,
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -207,53 +413,120 @@ class _RenamerPageState extends State<RenamerPage> {
     bool isExpanded,
     FileStateService fileState,
   ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Card(
       elevation: isExpanded ? 2 : 0,
       color: isRenamed
-          ? const Color(0xFF10B981).withOpacity(0.1)
-          : Theme.of(context).cardColor,
+          ? AppColors.lightSuccess.withOpacity(0.1)
+          : (isDark ? AppColors.darkSurface : AppColors.lightSurface),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppDimensions.cardBorderRadius),
+        side: BorderSide(
+          color: isRenamed
+              ? AppColors.lightSuccess.withOpacity(0.3)
+              : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+          width: 1,
+        ),
+      ),
       child: Column(
         children: [
           // Main Row
           InkWell(
-            onTap: () => _toggleExpanded(index), // Always allow editing
-            borderRadius: BorderRadius.circular(12),
+            onTap: () => _toggleExpanded(index),
+            borderRadius: BorderRadius.circular(AppDimensions.cardBorderRadius),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppSpacing.md),
               child: Row(
                 children: [
                   // Expand Icon
-                  if (!isRenamed)
-                    Icon(
-                      isExpanded
-                          ? Icons.keyboard_arrow_down
-                          : Icons.keyboard_arrow_right,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                  if (isRenamed)
-                    Icon(
-                      isExpanded
-                          ? Icons.keyboard_arrow_down
-                          : Icons.keyboard_arrow_right,
-                      color: const Color(0xFF10B981),
-                    ),
-                  const SizedBox(width: 12),
+                  Icon(
+                    isExpanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    color: isRenamed
+                        ? AppColors.lightSuccess
+                        : Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
 
-                  // Cover Image Thumbnail
-                  if (output?.posterUrl != null)
+                  // Status Indicator (compact circular) - always show status
+                  Builder(
+                    builder: (context) {
+                      final hasMetadata = output != null &&
+                          output.title != null &&
+                          output.title!.isNotEmpty;
+
+                      IconData statusIcon;
+                      Color statusColor;
+                      String statusTooltip;
+
+                      if (isRenamed) {
+                        statusIcon = Icons.check;
+                        statusColor = AppColors.lightSuccess;
+                        statusTooltip = 'Renamed successfully';
+                      } else if (hasMetadata) {
+                        statusIcon = Icons.cloud_done_outlined;
+                        statusColor = Theme.of(context).colorScheme.primary;
+                        statusTooltip =
+                            'Metadata ready - click Rename to apply';
+                      } else {
+                        statusIcon = Icons.warning_amber_rounded;
+                        statusColor = Colors.orange;
+                        statusTooltip =
+                            'No metadata - click cloud icon to search';
+                      }
+
+                      return Tooltip(
+                        message: statusTooltip,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: statusColor.withAlpha(38),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            statusIcon,
+                            size: 16,
+                            color: statusColor,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+
+                  // Cover Image Thumbnail - use coverBytes if available, posterUrl as fallback
+                  if (output?.coverBytes != null || output?.posterUrl != null)
                     Container(
                       width: 40,
                       height: 60,
-                      margin: const EdgeInsets.only(right: 12),
+                      margin: const EdgeInsets.only(right: AppSpacing.sm),
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(4),
-                        image: DecorationImage(
-                          image: output!.posterUrl!.startsWith('http')
-                              ? NetworkImage(output.posterUrl!)
-                              : FileImage(File(output.posterUrl!))
-                                  as ImageProvider,
-                          fit: BoxFit.cover,
-                        ),
+                        borderRadius: BorderRadius.circular(
+                            AppDimensions.inputBorderRadius),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(
+                            AppDimensions.inputBorderRadius),
+                        child: output!.coverBytes != null
+                            ? Image.memory(
+                                output.coverBytes!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Icon(Icons.broken_image, size: 20);
+                                },
+                              )
+                            : (output.posterUrl != null &&
+                                    output.posterUrl!.startsWith('http'))
+                                ? Image.network(
+                                    output.posterUrl!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Icon(Icons.broken_image, size: 20);
+                                    },
+                                  )
+                                : Icon(Icons.image_not_supported, size: 20),
                       ),
                     ),
 
@@ -264,51 +537,66 @@ class _RenamerPageState extends State<RenamerPage> {
                       children: [
                         Text(
                           input.fileName,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            decoration:
-                                isRenamed ? TextDecoration.lineThrough : null,
-                            color: isRenamed
-                                ? Colors.grey
-                                : Theme.of(context).textTheme.bodyLarge?.color,
-                          ),
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    decoration: isRenamed
+                                        ? TextDecoration.lineThrough
+                                        : null,
+                                    color: isRenamed
+                                        ? (isDark
+                                            ? AppColors.darkTextSecondary
+                                            : AppColors.lightTextSecondary)
+                                        : (isDark
+                                            ? AppColors.darkTextPrimary
+                                            : AppColors.lightTextPrimary),
+                                  ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
-                        if (output != null)
+                        if (output != null &&
+                            output.title != null &&
+                            output.title!.isNotEmpty)
                           Text(
                             _buildMetadataPreview(output),
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey.shade600,
-                            ),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: isDark
+                                          ? AppColors.darkTextSecondary
+                                          : AppColors.lightTextSecondary,
+                                    ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           )
                         else
-                          const Text(
-                            "Click to add metadata manually or Match to auto-fetch",
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey,
-                              fontStyle: FontStyle.italic,
-                            ),
+                          Text(
+                            "No metadata • Click to edit manually or use Match button",
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: isDark
+                                          ? AppColors.darkTextTertiary
+                                          : AppColors.lightTextTertiary,
+                                      fontStyle: FontStyle.italic,
+                                    ),
                           ),
                       ],
                     ),
                   ),
 
+                  const SizedBox(width: AppSpacing.sm),
+
                   // Arrow Icon / Status
-                  const SizedBox(width: 12),
                   Icon(
-                    isRenamed ? Icons.check : Icons.arrow_forward,
+                    isRenamed ? Icons.check_circle : Icons.arrow_forward,
                     color: isRenamed
-                        ? const Color(0xFF10B981)
-                        : Colors.grey.shade400,
+                        ? AppColors.lightSuccess
+                        : (isDark
+                            ? AppColors.darkTextTertiary
+                            : AppColors.lightTextTertiary),
                   ),
 
-                  const SizedBox(width: 12),
+                  const SizedBox(width: AppSpacing.sm),
 
                   // Output Name
                   Expanded(
@@ -316,21 +604,78 @@ class _RenamerPageState extends State<RenamerPage> {
                       isRenamed
                           ? p.basename(input.renamedPath!)
                           : (output?.newName ?? "Pending..."),
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: isRenamed
-                            ? const Color(0xFF10B981)
-                            : Theme.of(context).colorScheme.primary,
-                      ),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: isRenamed
+                                ? AppColors.lightSuccess
+                                : Theme.of(context).colorScheme.primary,
+                          ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
 
+                  // Search Online Button
+                  if (!isRenamed)
+                    IconButton(
+                      icon: const Icon(Icons.cloud_download_outlined, size: 20),
+                      color: Theme.of(context).colorScheme.primary,
+                      onPressed: () async {
+                        final settings = context.read<SettingsService>();
+
+                        // Check if API keys are configured
+                        if (settings.metadataSource == 'tmdb' &&
+                            settings.tmdbApiKey.isEmpty) {
+                          SnackbarHelper.showWarning(
+                            context,
+                            'TMDB API key not configured. Go to Settings to add it.',
+                          );
+                          return;
+                        }
+                        if (settings.metadataSource == 'omdb' &&
+                            settings.omdbApiKey.isEmpty) {
+                          SnackbarHelper.showWarning(
+                            context,
+                            'OMDB API key not configured. Go to Settings to add it.',
+                          );
+                          return;
+                        }
+
+                        SnackbarHelper.showInfo(
+                          context,
+                          'Searching for "${input.fileName}"...',
+                        );
+
+                        await fileState.matchSingleFile(index, settings);
+
+                        if (context.mounted) {
+                          final result = fileState.matchResults.length > index
+                              ? fileState.matchResults[index]
+                              : null;
+                          if (result != null &&
+                              result.title != null &&
+                              result.title!.isNotEmpty) {
+                            SnackbarHelper.showSuccess(
+                              context,
+                              'Found: ${result.title}${result.year != null ? " (${result.year})" : ""}',
+                            );
+                          } else {
+                            SnackbarHelper.showWarning(
+                              context,
+                              'No match found. Try editing metadata manually.',
+                            );
+                          }
+                        }
+                      },
+                      tooltip: "Search online metadata",
+                    ),
+
                   // Delete Button
                   IconButton(
-                    icon: const Icon(Icons.close),
-                    color: Colors.grey.shade600,
+                    icon: const Icon(Icons.close, size: 20),
+                    color: isDark
+                        ? AppColors.darkTextSecondary
+                        : AppColors.lightTextSecondary,
                     onPressed: () {
                       if (isExpanded) _toggleExpanded(index);
                       fileState.removeFileAt(index);
@@ -342,16 +687,33 @@ class _RenamerPageState extends State<RenamerPage> {
             ),
           ),
 
-          // Expanded Metadata Editor - Works Always!
+          // Expanded Metadata Editor
           if (isExpanded)
             InlineMetadataEditor(
               originalName: input.fileName,
               initialResult: output ?? MatchResult(newName: input.fileName),
               onSave: (newResult) {
                 fileState.updateManualMatch(index, newResult);
-                _toggleExpanded(index);
               },
               onCancel: () => _toggleExpanded(index),
+              onRename: (MatchResult result) async {
+                // Update the match result first
+                fileState.updateManualMatch(index, result);
+                // Then rename
+                final settings = context.read<SettingsService>();
+                final success =
+                    await fileState.renameSingleFile(index, settings: settings);
+                if (context.mounted) {
+                  _toggleExpanded(index);
+                  if (success) {
+                    SnackbarHelper.showSuccess(
+                        context, 'File renamed successfully!');
+                  } else {
+                    SnackbarHelper.showError(context,
+                        'Failed to rename file. Check console for details.');
+                  }
+                }
+              },
             ),
         ],
       ),
@@ -360,9 +722,20 @@ class _RenamerPageState extends State<RenamerPage> {
 
   String _buildMetadataPreview(MatchResult output) {
     if (output.type == 'episode') {
-      return "${output.title} • S${output.season?.toString().padLeft(2, '0')}E${output.episode?.toString().padLeft(2, '0')} • ${output.year ?? ''}";
+      String season = output.season != null
+          ? 'S${output.season.toString().padLeft(2, '0')}'
+          : 'S??';
+      String episode = output.episode != null
+          ? 'E${output.episode.toString().padLeft(2, '0')}'
+          : 'E??';
+      String year = output.year != null ? ' • ${output.year}' : '';
+      return "${output.title ?? 'Unknown'} • $season$episode$year";
     } else {
-      return "${output.title} • ${output.year ?? ''} • ${output.genres?.take(2).join(', ') ?? ''}";
+      String year = output.year != null ? ' • ${output.year}' : '';
+      String genres = output.genres != null && output.genres!.isNotEmpty
+          ? ' • ${output.genres!.take(2).join(', ')}'
+          : '';
+      return "${output.title ?? 'Unknown Movie'}$year$genres";
     }
   }
 }

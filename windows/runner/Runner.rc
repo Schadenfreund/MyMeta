@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "simpler_filebot" "\0"
+            VALUE "CompanyName", "MyMeta" "\0"
+            VALUE "FileDescription", "MyMeta - Media File Metadata Manager" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "simpler_filebot" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "simpler_filebot.exe" "\0"
-            VALUE "ProductName", "simpler_filebot" "\0"
+            VALUE "InternalName", "MyMeta" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2025 MyMeta. All rights reserved." "\0"
+            VALUE "OriginalFilename", "MyMeta.exe" "\0"
+            VALUE "ProductName", "MyMeta" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

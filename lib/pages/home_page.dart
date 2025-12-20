@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'renamer_page.dart';
@@ -5,6 +6,7 @@ import 'formats_page.dart';
 import 'settings_page.dart';
 import '../widgets/custom_titlebar.dart';
 import '../services/settings_service.dart';
+import '../theme/app_theme.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -13,9 +15,11 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
-  int _selectedIndex = 0;
-  bool _sidebarVisible = false;
+class _HomePageState extends State<HomePage>
+    with SingleTickerProviderStateMixin {
+  bool _tabbarVisible = false;
+  late TabController _tabController;
+  Timer? _hideTimer;
 
   static const List<Widget> _pages = <Widget>[
     RenamerPage(),
@@ -30,6 +34,39 @@ class _HomePageState extends State<HomePage> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: _tabs.length, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _showTabBar() {
+    _hideTimer?.cancel();
+    if (!_tabbarVisible) {
+      setState(() {
+        _tabbarVisible = true;
+      });
+    }
+  }
+
+  void _scheduleHideTabBar() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        setState(() {
+          _tabbarVisible = false;
+        });
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
     final accentColor = settings.accentColor;
@@ -38,65 +75,50 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       body: Column(
         children: [
-          const CustomTitleBar(),
+          // Header with hover detection
+          MouseRegion(
+            onEnter: (_) => _showTabBar(),
+            onExit: (_) => _scheduleHideTabBar(),
+            child: const CustomTitleBar(),
+          ),
           Expanded(
             child: Stack(
               children: [
-                // Content Area (full width)
-                _pages[_selectedIndex],
+                // Content Area with TabBarView
+                TabBarView(
+                  controller: _tabController,
+                  children: _pages,
+                ),
 
-                // Auto-Hide Sidebar
+                // Retractable Tab Bar overlaying content
                 Positioned(
-                  left: 0,
                   top: 0,
-                  bottom: 0,
-                  child: MouseRegion(
-                    onEnter: (_) => setState(() => _sidebarVisible = true),
-                    onExit: (_) => setState(() => _sidebarVisible = false),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeInOut,
-                      width: _sidebarVisible ? 72 : 4,
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? const Color(0xFF1E293B)
-                            : const Color(0xFFF8FAFC),
-                        border: _sidebarVisible
-                            ? Border(
-                                right: BorderSide(
-                                  color: isDark
-                                      ? const Color(0xFF334155)
-                                      : Colors.grey.shade200,
-                                  width: 1,
-                                ),
-                              )
-                            : null,
-                        boxShadow: _sidebarVisible
-                            ? [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.1),
-                                  blurRadius: 8,
-                                  offset: const Offset(2, 0),
-                                ),
-                              ]
-                            : null,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(
+                    ignoring: !_tabbarVisible,
+                    child: MouseRegion(
+                      onEnter: (_) => _showTabBar(),
+                      onExit: (_) => _scheduleHideTabBar(),
+                      child: AnimatedSlide(
+                        duration: const Duration(milliseconds: 150),
+                        curve: Curves.easeOutCubic,
+                        offset: _tabbarVisible
+                            ? Offset.zero
+                            : const Offset(0, -1.0),
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 150),
+                          curve: Curves.easeOutCubic,
+                          opacity: _tabbarVisible ? 1.0 : 0.0,
+                          child: IgnorePointer(
+                            ignoring: !_tabbarVisible,
+                            child: SizedBox(
+                              height: AppDimensions.tabBarHeight,
+                              child: _buildTabBar(accentColor, isDark),
+                            ),
+                          ),
+                        ),
                       ),
-                      child: _sidebarVisible
-                          ? Column(
-                              children: [
-                                const SizedBox(height: 8),
-                                ...List.generate(_tabs.length, (index) {
-                                  return _buildSidebarTab(
-                                    _tabs[index].label,
-                                    _tabs[index].icon,
-                                    index,
-                                    accentColor,
-                                    isDark,
-                                  );
-                                }),
-                              ],
-                            )
-                          : const SizedBox(),
                     ),
                   ),
                 ),
@@ -108,64 +130,62 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSidebarTab(
-    String label,
-    IconData icon,
-    int index,
-    Color accentColor,
-    bool isDark,
-  ) {
-    final isSelected = _selectedIndex == index;
+  Widget _buildTabBar(Color accentColor, bool isDark) {
+    final bgColor = isDark ? AppColors.darkSurface : AppColors.lightSurface;
+    final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
+    final secondaryColor =
+        isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
 
-    return Tooltip(
-      message: label,
-      waitDuration: const Duration(milliseconds: 500),
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
-        child: Container(
-          height: 64,
-          width: 72, // Explicit full width
-          decoration: BoxDecoration(
-            color: isSelected ? accentColor : Colors.transparent,
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: accentColor.withOpacity(0.4),
-                      blurRadius: 12,
-                      spreadRadius: 0,
-                      offset: const Offset(0, 0),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 22,
-                color: isSelected
-                    ? Colors.white
-                    : (isDark ? Colors.grey.shade500 : Colors.grey.shade600),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isSelected
-                      ? Colors.white
-                      : (isDark ? Colors.grey.shade500 : Colors.grey.shade600),
-                ),
-              ),
-            ],
+    return Container(
+      decoration: BoxDecoration(
+        color: bgColor,
+        border: Border(
+          bottom: BorderSide(
+            color: borderColor,
+            width: 1,
           ),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: TabBar(
+        controller: _tabController,
+        isScrollable: true,
+        indicatorSize: TabBarIndicatorSize.label,
+        indicatorWeight: 3.0,
+        indicator: UnderlineTabIndicator(
+          borderRadius: BorderRadius.circular(2),
+          borderSide: BorderSide(width: 3, color: accentColor),
+        ),
+        labelColor: accentColor,
+        unselectedLabelColor: secondaryColor,
+        overlayColor: WidgetStateProperty.all(accentColor.withOpacity(0.1)),
+        labelStyle: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelStyle: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+        ),
+        tabs: _tabs.map((tab) {
+          return Tab(
+            height: 44,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(tab.icon, size: 18),
+                const SizedBox(width: 6),
+                Text(tab.label),
+              ],
+            ),
+          );
+        }).toList(),
       ),
     );
   }

@@ -1,6 +1,9 @@
+import 'dart:typed_data';
+
 class MatchResult {
   String newName; // Mutable to allow manual edits
-  String? posterUrl;
+  String? posterUrl; // Keep for online images
+  Uint8List? coverBytes; // NEW: In-memory cover art
 
   // Basic Metadata
   String? title;
@@ -27,6 +30,7 @@ class MatchResult {
   MatchResult({
     required this.newName,
     this.posterUrl,
+    this.coverBytes, // NEW
     this.title,
     this.year,
     this.season,

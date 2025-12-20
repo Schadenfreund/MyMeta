@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
-import 'dart:io';
 import '../backend/match_result.dart';
 import '../backend/core_backend.dart';
 import '../services/settings_service.dart';
@@ -12,6 +12,8 @@ class InlineMetadataEditor extends StatefulWidget {
   final MatchResult initialResult;
   final Function(MatchResult) onSave;
   final VoidCallback onCancel;
+  final Future<void> Function(MatchResult)?
+      onRename; // Receives result directly
 
   const InlineMetadataEditor({
     super.key,
@@ -19,6 +21,7 @@ class InlineMetadataEditor extends StatefulWidget {
     required this.initialResult,
     required this.onSave,
     required this.onCancel,
+    this.onRename,
   });
 
   @override
@@ -42,6 +45,7 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
   late TextEditingController _runtimeController;
 
   String _type = 'movie';
+  bool _isProcessing = false; // Prevents double-clicking
 
   @override
   void initState() {
@@ -137,49 +141,64 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
     });
   }
 
-  void _save() {
-    String newName = _nameController.text;
-    String? poster =
-        _posterUrlController.text.isEmpty ? null : _posterUrlController.text;
+  /// Paste image URL or path from clipboard
+  Future<void> _pasteFromClipboard() async {
+    final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
+    if (clipboardData?.text != null && clipboardData!.text!.isNotEmpty) {
+      final text = clipboardData.text!.trim();
+      // Check if it's a URL or a file path
+      if (text.startsWith('http') ||
+          text.startsWith('https') ||
+          text.contains('\\') ||
+          text.contains('/')) {
+        setState(() {
+          _posterUrlController.text = text;
+        });
+      }
+    }
+  }
 
-    List<String>? genres = _genresController.text.isNotEmpty
-        ? _genresController.text
-            .split(',')
-            .map((g) => g.trim())
-            .where((g) => g.isNotEmpty)
-            .toList()
-        : null;
-
-    List<String>? actors = _actorsController.text.isNotEmpty
-        ? _actorsController.text
-            .split(',')
-            .map((a) => a.trim())
-            .where((a) => a.isNotEmpty)
-            .toList()
-        : null;
-
-    widget.onSave(MatchResult(
-      newName: newName,
-      posterUrl: poster,
-      title: _titleController.text,
-      year: int.tryParse(_yearController.text),
-      season: int.tryParse(_seasonController.text),
-      episode: int.tryParse(_episodeController.text),
-      episodeTitle: _episodeTitleController.text,
-      type: _type,
-      description: _descriptionController.text.isEmpty
-          ? null
-          : _descriptionController.text,
-      genres: genres,
-      director:
-          _directorController.text.isEmpty ? null : _directorController.text,
-      actors: actors,
-      rating: double.tryParse(_ratingController.text),
-      contentRating: _contentRatingController.text.isEmpty
-          ? null
-          : _contentRatingController.text,
-      runtime: int.tryParse(_runtimeController.text),
-    ));
+  /// Show context menu for cover art
+  void _showCoverContextMenu(BuildContext context, Offset position) {
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      items: [
+        const PopupMenuItem<String>(
+          value: 'paste',
+          child: Row(
+            children: [
+              Icon(Icons.paste, size: 18),
+              SizedBox(width: 8),
+              Text('Paste Image URL'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'clear',
+          child: Row(
+            children: [
+              Icon(Icons.clear, size: 18),
+              SizedBox(width: 8),
+              Text('Clear Image'),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value == 'paste') {
+        _pasteFromClipboard();
+      } else if (value == 'clear') {
+        setState(() {
+          _posterUrlController.text = '';
+        });
+      }
+    });
   }
 
   @override
@@ -242,60 +261,77 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
                   children: [
                     AspectRatio(
                       aspectRatio: 2 / 3,
-                      child: DropTarget(
-                        onDragDone: (detail) {
-                          if (detail.files.isNotEmpty) {
-                            setState(() {
-                              _posterUrlController.text =
-                                  detail.files.first.path;
-                            });
-                          }
+                      child: GestureDetector(
+                        onSecondaryTapUp: (details) {
+                          _showCoverContextMenu(
+                              context, details.globalPosition);
                         },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: Theme.of(context).dividerColor,
+                        child: DropTarget(
+                          onDragDone: (detail) {
+                            if (detail.files.isNotEmpty) {
+                              setState(() {
+                                _posterUrlController.text =
+                                    detail.files.first.path;
+                              });
+                            }
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: Theme.of(context).dividerColor,
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                              color: Theme.of(context).colorScheme.surface,
                             ),
-                            borderRadius: BorderRadius.circular(8),
-                            color: Theme.of(context).colorScheme.surface,
-                            image: _posterUrlController.text.isNotEmpty
-                                ? DecorationImage(
-                                    image: _getImageProvider(
-                                        _posterUrlController.text),
-                                    fit: BoxFit.cover,
-                                  )
-                                : null,
-                          ),
-                          child: _posterUrlController.text.isEmpty
-                              ? Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: const [
-                                    Icon(Icons.add_photo_alternate_outlined,
-                                        size: 40, color: Colors.grey),
-                                    SizedBox(height: 8),
-                                    Text("Drop Image",
-                                        style: TextStyle(color: Colors.grey)),
-                                  ],
-                                )
-                              : Stack(
-                                  children: [
-                                    Positioned(
-                                      top: 8,
-                                      right: 8,
-                                      child: CircleAvatar(
-                                        backgroundColor: Colors.black54,
-                                        radius: 16,
-                                        child: IconButton(
-                                          padding: EdgeInsets.zero,
-                                          icon: const Icon(Icons.close,
-                                              size: 16, color: Colors.white),
-                                          onPressed: () => setState(() =>
-                                              _posterUrlController.clear()),
-                                        ),
-                                      ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: widget.initialResult.coverBytes != null
+                                  ? Image.memory(
+                                      widget.initialResult.coverBytes!,
+                                      fit: BoxFit.cover,
+                                      width: double.infinity,
+                                      height: double.infinity,
                                     )
-                                  ],
-                                ),
+                                  : (_posterUrlController.text.isNotEmpty
+                                      ? Image.network(
+                                          _posterUrlController.text,
+                                          fit: BoxFit.cover,
+                                          width: double.infinity,
+                                          height: double.infinity,
+                                          errorBuilder:
+                                              (context, error, stack) {
+                                            return Column(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: const [
+                                                Icon(Icons.broken_image,
+                                                    size: 40,
+                                                    color: Colors.grey),
+                                                SizedBox(height: 8),
+                                                Text("Image Error",
+                                                    style: TextStyle(
+                                                        color: Colors.grey)),
+                                              ],
+                                            );
+                                          },
+                                        )
+                                      : Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: const [
+                                            Icon(
+                                                Icons
+                                                    .add_photo_alternate_outlined,
+                                                size: 40,
+                                                color: Colors.grey),
+                                            SizedBox(height: 8),
+                                            Text("Drop Image",
+                                                style: TextStyle(
+                                                    color: Colors.grey)),
+                                          ],
+                                        )),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -490,18 +526,104 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
 
           const SizedBox(height: 20),
 
-          // Action Buttons
+          // Action Buttons - Simplified: Cancel or Apply & Rename
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               OutlinedButton(
-                onPressed: widget.onCancel,
+                onPressed: _isProcessing ? null : widget.onCancel,
                 child: const Text("Cancel"),
               ),
               const SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: _save,
-                child: const Text("Save Changes"),
+              ElevatedButton.icon(
+                onPressed: _isProcessing
+                    ? null
+                    : () async {
+                        // Prevent double-clicks
+                        if (_isProcessing) return;
+                        setState(() => _isProcessing = true);
+
+                        try {
+                          // Build the result first
+                          String newName = _nameController.text;
+                          String? poster = _posterUrlController.text.isEmpty
+                              ? null
+                              : _posterUrlController.text;
+
+                          List<String>? genres =
+                              _genresController.text.isNotEmpty
+                                  ? _genresController.text
+                                      .split(',')
+                                      .map((g) => g.trim())
+                                      .where((g) => g.isNotEmpty)
+                                      .toList()
+                                  : null;
+
+                          List<String>? actors =
+                              _actorsController.text.isNotEmpty
+                                  ? _actorsController.text
+                                      .split(',')
+                                      .map((a) => a.trim())
+                                      .where((a) => a.isNotEmpty)
+                                      .toList()
+                                  : null;
+
+                          final result = MatchResult(
+                            newName: newName,
+                            posterUrl: poster,
+                            coverBytes: widget.initialResult.coverBytes,
+                            title: _titleController.text,
+                            year: int.tryParse(_yearController.text),
+                            season: int.tryParse(_seasonController.text),
+                            episode: int.tryParse(_episodeController.text),
+                            episodeTitle: _episodeTitleController.text,
+                            type: _type,
+                            description: _descriptionController.text.isEmpty
+                                ? null
+                                : _descriptionController.text,
+                            genres: genres,
+                            director: _directorController.text.isEmpty
+                                ? null
+                                : _directorController.text,
+                            actors: actors,
+                            rating: double.tryParse(_ratingController.text),
+                            contentRating: _contentRatingController.text.isEmpty
+                                ? null
+                                : _contentRatingController.text,
+                            runtime: int.tryParse(_runtimeController.text),
+                          );
+
+                          // Save first, then rename with the result
+                          widget.onSave(result);
+                          if (widget.onRename != null) {
+                            await widget.onRename!(result);
+                          }
+                        } finally {
+                          if (mounted) {
+                            setState(() => _isProcessing = false);
+                          }
+                        }
+                      },
+                icon: _isProcessing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Icon(Icons.check, size: 18),
+                label: Text(_isProcessing ? "Processing..." : "Apply & Rename"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                ),
               ),
             ],
           ),
@@ -547,13 +669,5 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
         hintText: hint,
       ),
     );
-  }
-
-  ImageProvider _getImageProvider(String pathOrUrl) {
-    if (pathOrUrl.startsWith('http')) {
-      return NetworkImage(pathOrUrl);
-    } else {
-      return FileImage(File(pathOrUrl));
-    }
   }
 }

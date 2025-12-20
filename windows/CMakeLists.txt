@@ -106,3 +106,16 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# Install FFmpeg executables (if available)
+set(FFMPEG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg")
+if(EXISTS "${FFMPEG_DIR}/ffmpeg.exe")
+  install(FILES "${FFMPEG_DIR}/ffmpeg.exe" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+  message(STATUS "FFmpeg will be bundled with the application")
+endif()
+if(EXISTS "${FFMPEG_DIR}/ffprobe.exe")
+  install(FILES "${FFMPEG_DIR}/ffprobe.exe" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+  message(STATUS "FFprobe will be bundled with the application")
+endif()

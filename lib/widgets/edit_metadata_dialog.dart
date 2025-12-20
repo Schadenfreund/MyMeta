@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'dart:io';
 import '../backend/match_result.dart';
 import '../backend/core_backend.dart';
 import '../services/settings_service.dart';
+import '../utils/snackbar_helper.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 
@@ -220,54 +220,64 @@ class _EditMetadataDialogState extends State<EditMetadataDialog> {
                                         style: BorderStyle.solid),
                                     color:
                                         Theme.of(context).colorScheme.surface,
-                                    borderRadius: BorderRadius.circular(8),
-                                    image: _posterUrlController.text.isNotEmpty
-                                        ? DecorationImage(
-                                            image: _getImageProvider(
-                                                _posterUrlController.text),
-                                            fit: BoxFit.cover)
-                                        : null),
-                                child: _posterUrlController.text.isEmpty
-                                    ? Center(
-                                        child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: const [
-                                          Icon(
-                                              Icons
-                                                  .add_photo_alternate_outlined,
-                                              size: 48,
-                                              color: Colors.grey),
-                                          SizedBox(height: 8),
-                                          Text("Drop Cover Here",
-                                              style:
-                                                  TextStyle(color: Colors.grey))
-                                        ],
-                                      ))
-                                    : Stack(
-                                        children: [
-                                          Positioned(
-                                              top: 8,
-                                              right: 8,
-                                              child: CircleAvatar(
-                                                backgroundColor: Colors.black54,
-                                                radius: 16,
-                                                child: IconButton(
-                                                  padding: EdgeInsets.zero,
-                                                  icon: const Icon(Icons.close,
-                                                      size: 16,
-                                                      color: Colors.white),
-                                                  onPressed: () => setState(
-                                                      () => _posterUrlController
-                                                          .clear()),
-                                                ),
-                                              ))
-                                        ],
-                                      )),
+                                    borderRadius: BorderRadius.circular(8)),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: widget.initialResult.coverBytes != null
+                                      ? Image.memory(
+                                          widget.initialResult.coverBytes!,
+                                          fit: BoxFit.cover,
+                                          width: double.infinity,
+                                          height: double.infinity,
+                                        )
+                                      : (_posterUrlController.text.isNotEmpty
+                                          ? Image.network(
+                                              _posterUrlController.text,
+                                              fit: BoxFit.cover,
+                                              width: double.infinity,
+                                              height: double.infinity,
+                                              errorBuilder:
+                                                  (context, error, stack) {
+                                                return const Center(
+                                                  child: Column(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Icon(Icons.broken_image,
+                                                          size: 48,
+                                                          color: Colors.grey),
+                                                      SizedBox(height: 8),
+                                                      Text("Image Error",
+                                                          style: TextStyle(
+                                                              color:
+                                                                  Colors.grey)),
+                                                    ],
+                                                  ),
+                                                );
+                                              },
+                                            )
+                                          : const Center(
+                                              child: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                      Icons
+                                                          .add_photo_alternate_outlined,
+                                                      size: 48,
+                                                      color: Colors.grey),
+                                                  SizedBox(height: 8),
+                                                  Text("Drop Cover Here",
+                                                      style: TextStyle(
+                                                          color: Colors.grey)),
+                                                ],
+                                              ),
+                                            )),
+                                )),
                           ),
                         ),
                         const SizedBox(height: 12),
 
-                        // Import Button & URL
+                        // Import Button
                         ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
                               minimumSize: const Size(double.infinity, 45),
@@ -285,17 +295,15 @@ class _EditMetadataDialogState extends State<EditMetadataDialog> {
                             icon: const Icon(Icons.upload_file),
                             label: const Text("Select File")),
                         const SizedBox(height: 8),
-                        TextField(
-                          controller: _posterUrlController,
-                          decoration: const InputDecoration(
-                              hintText: "Or paste URL here...",
-                              isDense: true,
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 8)),
-                          style: const TextStyle(fontSize: 12),
-                          onChanged: (_) => setState(() {}),
-                        )
+
+                        // Find Alternative Covers Button
+                        OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(double.infinity, 45),
+                            ),
+                            onPressed: _findAlternativeCovers,
+                            icon: const Icon(Icons.image_search),
+                            label: const Text("Find Alternative Covers")),
                       ],
                     ),
                   ),
@@ -526,12 +534,11 @@ class _EditMetadataDialogState extends State<EditMetadataDialog> {
     );
   }
 
-  ImageProvider _getImageProvider(String pathOrUrl) {
-    if (pathOrUrl.startsWith('http')) {
-      return NetworkImage(pathOrUrl);
-    } else {
-      return FileImage(File(pathOrUrl));
-    }
+  Future<void> _findAlternativeCovers() async {
+    SnackbarHelper.showInfo(
+      context,
+      'Alternative cover search coming soon! Drag and drop an image file onto the cover area.',
+    );
   }
 
   void _save() {

@@ -2,7 +2,7 @@
 setlocal
 
 echo ==========================================
-echo    Simpler FileBot - Windows Build Script
+echo    MyMeta - Windows Build Script
 echo ==========================================
 
 REM Check if Flutter is installed
@@ -42,7 +42,7 @@ echo    Build Successful!
 echo ==========================================
 echo.
 echo The executable is located at:
-echo build\windows\runner\Release\simpler_filebot.exe
+echo build\windows\x64\runner\Release\MyMeta.exe
 echo.
 echo You can zip the content of 'build\windows\runner\Release' to share your app.
 echo.

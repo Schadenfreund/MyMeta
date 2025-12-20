@@ -7,11 +7,11 @@ class SettingsService with ChangeNotifier {
   static const String _movieFormatKey = 'movie_format';
   static const String _excludedFoldersKey = 'excluded_folders';
   static const String _filenameAnalysisOnlyKey = 'filename_analysis_only';
-  static const String _tmdbApiKeyKey = 'tmdb_api_key'; // NEW
+  static const String _tmdbApiKeyKey = 'tmdb_api_key';
   static const String _omdbApiKeyKey = 'omdb_api_key';
-  static const String _metadataSourceKey =
-      'metadata_source'; // 'tmdb' or 'omdb'
+  static const String _metadataSourceKey = 'metadata_source';
   static const String _accentColorKey = 'accent_color';
+  static const String _ffmpegPathKey = 'ffmpeg_folder_path'; // Folder path only
 
   late SharedPreferences _prefs;
 
@@ -22,20 +22,22 @@ class SettingsService with ChangeNotifier {
   String _movieFormat = "{movie_name} ({year})";
   List<String> _excludedFolders = [];
   bool _filenameAnalysisOnly = false;
-  String _tmdbApiKey = ""; // NEW
+  String _tmdbApiKey = "";
   String _omdbApiKey = "";
   String _metadataSource = "tmdb";
   Color _accentColor = const Color(0xFF6366F1); // Indigo default
+  String _ffmpegPath = ""; // Stores the folder path
 
   ThemeMode get themeMode => _themeMode;
   String get seriesFormat => _seriesFormat;
   String get movieFormat => _movieFormat;
   List<String> get excludedFolders => _excludedFolders;
   bool get filenameAnalysisOnly => _filenameAnalysisOnly;
-  String get tmdbApiKey => _tmdbApiKey; // NEW
+  String get tmdbApiKey => _tmdbApiKey;
   String get omdbApiKey => _omdbApiKey;
   String get metadataSource => _metadataSource;
   Color get accentColor => _accentColor;
+  String get ffmpegPath => _ffmpegPath; // Returns folder path
 
   Future<void> loadSettings() async {
     _prefs = await SharedPreferences.getInstance();
@@ -67,6 +69,9 @@ class SettingsService with ChangeNotifier {
     if (colorValue != null) {
       _accentColor = Color(colorValue);
     }
+
+    // FFmpeg Paths
+    _ffmpegPath = _prefs.getString(_ffmpegPathKey) ?? "";
 
     notifyListeners();
   }
@@ -131,6 +136,12 @@ class SettingsService with ChangeNotifier {
   Future<void> setAccentColor(Color color) async {
     _accentColor = color;
     await _prefs.setInt(_accentColorKey, color.value);
+    notifyListeners();
+  }
+
+  Future<void> setFFmpegPath(String path) async {
+    _ffmpegPath = path;
+    await _prefs.setString(_ffmpegPathKey, path);
     notifyListeners();
   }
 

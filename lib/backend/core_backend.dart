@@ -1,9 +1,13 @@
 import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:path/path.dart' as p;
 import 'media_record.dart';
 import 'match_result.dart';
 import '../services/tmdb_service.dart';
 import '../services/omdb_service.dart';
+import '../services/settings_service.dart';
+import '../utils/cover_extractor.dart';
 import 'package:http/http.dart' as http;
 
 class CoreBackend {
@@ -395,10 +399,41 @@ class CoreBackend {
 
   /// Check FFmpeg availability (cached to avoid repeated checks)
   /// Checks for bundled ffmpeg.exe first, then falls back to PATH
-  static Future<bool> _checkFFmpegAvailable() async {
-    if (_ffmpegAvailable != null) return _ffmpegAvailable!;
+  static Future<bool> _checkFFmpegAvailable({SettingsService? settings}) async {
+    // Don't use cache if settings provided (path might have changed)
+    if (settings == null && _ffmpegAvailable != null) return _ffmpegAvailable!;
 
-    // First, try bundled ffmpeg.exe in app directory
+    // 1. Try custom folder path from settings
+    if (settings != null && settings.ffmpegPath.isNotEmpty) {
+      try {
+        final binPath = p.join(settings.ffmpegPath, 'bin', 'ffmpeg.exe');
+        if (File(binPath).existsSync()) {
+          var result = await Process.run(binPath, ['-version']);
+          if (result.exitCode == 0) {
+            _ffmpegPath = binPath;
+            _ffmpegAvailable = true;
+            print('✅ Using custom FFmpeg: $binPath');
+            return true;
+          }
+        }
+
+        // Try without bin/ subdirectory
+        final directPath = p.join(settings.ffmpegPath, 'ffmpeg.exe');
+        if (File(directPath).existsSync()) {
+          var result = await Process.run(directPath, ['-version']);
+          if (result.exitCode == 0) {
+            _ffmpegPath = directPath;
+            _ffmpegAvailable = true;
+            print('✅ Using custom FFmpeg: $directPath');
+            return true;
+          }
+        }
+      } catch (e) {
+        // Continue to bundled check
+      }
+    }
+
+    // 2. Try bundled ffmpeg.exe in app directory
     try {
       final exePath = Platform.resolvedExecutable;
       final exeDir = p.dirname(exePath);
@@ -417,7 +452,7 @@ class CoreBackend {
       // Continue to PATH check
     }
 
-    // Fall back to FFmpeg in PATH
+    // 3. Fall back to FFmpeg in PATH
     try {
       var result = await Process.run('ffmpeg', ['-version']);
       _ffmpegAvailable = result.exitCode == 0;
@@ -443,8 +478,445 @@ class CoreBackend {
         .replaceAll('"', '\\"');
   }
 
+  /// Read existing metadata from a media file using FFprobe
+  static Future<MatchResult?> readMetadata(String filePath,
+      {SettingsService? settings}) async {
+    print("\n" + "=" * 60);
+    print("📖 READING METADATA: ${p.basename(filePath)}");
+    print("=" * 60);
+
+    // Validate input file
+    if (!File(filePath).existsSync()) {
+      print("❌ File doesn't exist: $filePath");
+      print("=" * 60 + "\n");
+      return null;
+    }
+
+    String ext = p.extension(filePath).toLowerCase();
+    if (ext != '.mp4' && ext != '.mkv') {
+      print("⚠️  Unsupported format (only .mp4 and .mkv supported)");
+      print("=" * 60 + "\n");
+      return null;
+    }
+
+    // Check FFprobe availability
+    String? ffprobePath;
+
+    // 1. Try custom folder path from settings first
+    if (settings != null && settings.ffmpegPath.isNotEmpty) {
+      // User provides folder path, we look in bin/ subdirectory
+      final binPath = p.join(settings.ffmpegPath, 'bin', 'ffprobe.exe');
+      if (File(binPath).existsSync()) {
+        ffprobePath = binPath;
+        print('✅ Using custom FFprobe: $ffprobePath');
+      } else {
+        // Try without bin/ subdirectory (in case user pointed directly to bin folder)
+        final directPath = p.join(settings.ffmpegPath, 'ffprobe.exe');
+        if (File(directPath).existsSync()) {
+          ffprobePath = directPath;
+          print('✅ Using custom FFprobe: $ffprobePath');
+        } else {
+          print('⚠️  FFprobe not found in: ${settings.ffmpegPath}');
+          print('    Expected: $binPath or $directPath');
+        }
+      }
+    }
+
+    // 2. Try bundled ffprobe (in same directory as exe)
+    if (ffprobePath == null) {
+      try {
+        final exePath = Platform.resolvedExecutable;
+        final exeDir = p.dirname(exePath);
+        final bundledFfprobe = p.join(exeDir, 'ffprobe.exe');
+
+        if (File(bundledFfprobe).existsSync()) {
+          ffprobePath = bundledFfprobe;
+          print('✅ Using bundled FFprobe: $bundledFfprobe');
+        }
+      } catch (e) {
+        print('⚠️  Could not locate bundled FFprobe: $e');
+      }
+    }
+
+    // 3. Fall back to FFprobe in system PATH
+    if (ffprobePath == null) {
+      try {
+        // Try using "where" command to find ffprobe in PATH
+        var result = await Process.run('where', ['ffprobe'], runInShell: true);
+        if (result.exitCode == 0) {
+          final paths = (result.stdout as String).trim().split('\n');
+          if (paths.isNotEmpty) {
+            ffprobePath = paths.first.trim();
+            print('✅ Using FFprobe from PATH: $ffprobePath');
+          }
+        }
+      } catch (e) {
+        print('⚠️  Error checking PATH for FFprobe: $e');
+      }
+    }
+
+    // 4. Last resort: try just "ffprobe" and hope it's in PATH
+    if (ffprobePath == null) {
+      try {
+        var result =
+            await Process.run('ffprobe', ['-version'], runInShell: true);
+        if (result.exitCode == 0) {
+          ffprobePath = 'ffprobe';
+          print('✅ FFprobe found in PATH');
+        }
+      } catch (e) {
+        print("❌ FFprobe not found anywhere!");
+        print("   Please configure FFprobe in Settings → FFmpeg Configuration");
+        print("   Or install FFmpeg and add it to your system PATH");
+        print("   Download from: https://ffmpeg.org/download.html");
+        print("=" * 60 + "\n");
+        return null;
+      }
+    }
+
+    if (ffprobePath == null) {
+      print("❌ FFprobe not available - Cannot read metadata");
+      print("=" * 60 + "\n");
+      return null;
+    }
+
+    // Run FFprobe to get metadata
+    try {
+      var result = await Process.run(
+        ffprobePath!, // Already checked for null above
+        [
+          '-v',
+          'quiet',
+          '-print_format',
+          'json',
+          '-show_format',
+          '-show_streams',
+          filePath,
+        ],
+        runInShell: true,
+      );
+
+      if (result.exitCode != 0) {
+        print("❌ FFprobe failed (exit ${result.exitCode})");
+        print("=" * 60 + "\n");
+        return null;
+      }
+
+      // Parse JSON output
+      final jsonData = json.decode(result.stdout);
+      final format = jsonData['format'];
+
+      if (format == null || format['tags'] == null) {
+        print("ℹ️  No metadata tags found");
+        print("=" * 60 + "\n");
+        return null;
+      }
+
+      final tags = format['tags'];
+
+      // DEBUG: Print ALL tags found
+      print("🔍 ALL TAGS FOUND:");
+      tags.forEach((key, value) {
+        print("   $key: $value");
+      });
+      print("");
+
+      // Extract metadata - check multiple variations
+      String? title = tags['title'] ?? tags['TITLE'];
+      String? yearStr =
+          tags['year'] ?? tags['date'] ?? tags['YEAR'] ?? tags['DATE'];
+      int? year;
+      if (yearStr != null) {
+        year = int.tryParse(yearStr.toString().substring(0, 4));
+      }
+
+      String? description = tags['comment'] ??
+          tags['description'] ??
+          tags['synopsis'] ??
+          tags['COMMENT'] ??
+          tags['DESCRIPTION'] ??
+          tags['SYNOPSIS'];
+
+      String? genre = tags['genre'] ?? tags['GENRE'];
+      List<String>? genres = genre?.split(',').map((e) => e.trim()).toList();
+
+      String? director = tags['director'] ??
+          tags['artist'] ??
+          tags['DIRECTOR'] ??
+          tags['ARTIST'];
+
+      String? actorStr =
+          tags['actor'] ?? tags['ACTOR'] ?? tags['actors'] ?? tags['ACTORS'];
+      List<String>? actors = actorStr?.split(',').map((e) => e.trim()).toList();
+
+      double? rating;
+      String? ratingStr = tags['rating'] ?? tags['RATING'];
+      if (ratingStr != null) {
+        rating = double.tryParse(ratingStr);
+      }
+
+      String? contentRating = tags['content_rating'] ?? tags['CONTENT_RATING'];
+
+      // TV Show metadata - check MANY variations!
+      String? show = tags['show'] ??
+          tags['SHOW'] ??
+          tags['series'] ??
+          tags['SERIES'] ??
+          tags['album'] ?? // Sometimes stored as album
+          tags['ALBUM'];
+
+      // Season - check multiple possible names
+      String? seasonStr = tags['season_number'] ??
+          tags['SEASON_NUMBER'] ??
+          tags['season'] ??
+          tags['SEASON'] ??
+          tags['PART'] ??
+          tags['part'];
+      int? season;
+      if (seasonStr != null) {
+        season = int.tryParse(seasonStr.toString());
+      }
+
+      // Episode - check multiple possible names
+      String? episodeStr = tags['episode_sort'] ??
+          tags['EPISODE_SORT'] ??
+          tags['episode'] ??
+          tags['EPISODE'] ??
+          tags['EPISODE_NUMBER'] ??
+          tags['episode_number'] ??
+          tags['PART_NUMBER'] ??
+          tags['part_number'] ??
+          tags['track'] ?? // Sometimes stored as track
+          tags['TRACK'];
+      int? episode;
+      if (episodeStr != null) {
+        episode = int.tryParse(episodeStr.toString());
+      }
+
+      String? episodeTitle = tags['episode_id'] ??
+          tags['EPISODE_ID'] ??
+          tags['subtitle'] ??
+          tags['SUBTITLE'];
+
+      // Determine type
+      String type = (season != null && episode != null) ? 'episode' : 'movie';
+
+      print("📊 Found metadata:");
+      print("   Title: ${title ?? 'N/A'}");
+      print("   Year: ${year ?? 'N/A'}");
+      print("   Type: $type");
+      if (type == 'episode') {
+        print("   Show: ${show ?? 'N/A'}");
+        print("   Season: ${season ?? 'N/A'}");
+        print("   Episode: ${episode ?? 'N/A'}");
+        print("   Episode Title: ${episodeTitle ?? 'N/A'}");
+      }
+      print("=" * 60 + "\n");
+
+      // Generate a proper newName based on the metadata
+      String newName;
+      if (type == 'episode' && season != null && episode != null) {
+        // TV Show format
+        final showTitle = title ?? show ?? 'Unknown Show';
+        final s = season.toString().padLeft(2, '0');
+        final e = episode.toString().padLeft(2, '0');
+        final ext = p.extension(filePath);
+        newName = '${showTitle} - S${s}E${e}$ext';
+        if (episodeTitle != null && episodeTitle.isNotEmpty) {
+          newName = '${showTitle} - S${s}E${e} - $episodeTitle$ext';
+        }
+      } else {
+        // Movie format
+        final movieTitle = title ?? 'Unknown Movie';
+        final ext = p.extension(filePath);
+        if (year != null) {
+          newName = '$movieTitle ($year)$ext';
+        } else {
+          newName = '$movieTitle$ext';
+        }
+      }
+
+      print("📝 Generated newName: $newName");
+      print("=" * 60 + "\n");
+
+      // Try to extract embedded cover art as bytes
+      Uint8List? coverBytes;
+      try {
+        coverBytes = await CoverExtractor.extractCoverBytes(filePath,
+            settings: settings);
+      } catch (e) {
+        print("⚠️  Could not extract cover art: $e");
+      }
+
+      // Create MatchResult with existing metadata
+      return MatchResult(
+        newName: newName, // Properly formatted name
+        title: title ?? (type == 'episode' ? show : null),
+        year: year,
+        season: season,
+        episode: episode,
+        episodeTitle: episodeTitle,
+        type: type,
+        description: description,
+        genres: genres,
+        director: director,
+        actors: actors,
+        rating: rating,
+        contentRating: contentRating,
+        coverBytes: coverBytes, // Include extracted cover art as bytes
+      );
+    } catch (e) {
+      print("❌ Error reading metadata: $e");
+      print("=" * 60 + "\n");
+      return null;
+    }
+  }
+
+  /// Download cover art from URL
+  static Future<void> downloadCover(String url, String savePath) async {
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        File(savePath).writeAsBytesSync(response.bodyBytes);
+        print('✅ Cover downloaded: $savePath');
+      } else {
+        print('❌ Failed to download cover: HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Error downloading cover: $e');
+    }
+  }
+
+  /// Extract embedded cover art from media file
+  static Future<String?> extractCoverArt(String filePath,
+      {SettingsService? settings}) async {
+    // Check FFmpeg availability
+    String? ffmpegPath;
+
+    // 1. Try custom folder path from settings first
+    if (settings != null && settings.ffmpegPath.isNotEmpty) {
+      // User provides folder path, we look in bin/ subdirectory
+      final binPath = p.join(settings.ffmpegPath, 'bin', 'ffmpeg.exe');
+      if (File(binPath).existsSync()) {
+        ffmpegPath = binPath;
+      } else {
+        // Try without bin/ subdirectory
+        final directPath = p.join(settings.ffmpegPath, 'ffmpeg.exe');
+        if (File(directPath).existsSync()) {
+          ffmpegPath = directPath;
+        }
+      }
+    }
+
+    // 2. Try bundled FFmpeg
+    if (ffmpegPath == null) {
+      try {
+        final exePath = Platform.resolvedExecutable;
+        final exeDir = p.dirname(exePath);
+        final bundledFfmpeg = p.join(exeDir, 'ffmpeg.exe');
+
+        if (File(bundledFfmpeg).existsSync()) {
+          ffmpegPath = bundledFfmpeg;
+        }
+      } catch (e) {
+        // Continue to PATH check
+      }
+    }
+
+    // 3. Try system PATH
+    if (ffmpegPath == null) {
+      try {
+        var result = await Process.run('ffmpeg', ['-version']);
+        if (result.exitCode == 0) {
+          ffmpegPath = 'ffmpeg';
+        }
+      } catch (e) {
+        return null; // FFmpeg not available
+      }
+    }
+
+    // Create cache folder in app directory (next to MyMeta.exe)
+    final exePath = Platform.resolvedExecutable;
+    final appDir = p.dirname(exePath);
+    final cacheDir = Directory(p.join(appDir, 'Cache'));
+
+    // Create cache directory if it doesn't exist
+    if (!cacheDir.existsSync()) {
+      cacheDir.createSync(recursive: true);
+    }
+
+    // Use filename as unique identifier for the cover
+    final fileName = p.basenameWithoutExtension(filePath);
+    final coverPath = p.join(cacheDir.path, '${fileName}_cover.jpg');
+
+    try {
+      // First try: Extract attached picture (works for MKV files with embedded covers)
+      var result = await Process.run(
+        ffmpegPath!,
+        [
+          '-dump_attachment:t', '', // Dump all attachments with mimetype image
+          '-i', filePath,
+          '-y',
+        ],
+        runInShell: true,
+        workingDirectory: cacheDir.path,
+      );
+
+      // Check if any image files were extracted
+      final extractedFiles = cacheDir
+          .listSync()
+          .where((f) =>
+              f.path.toLowerCase().endsWith('.jpg') ||
+              f.path.toLowerCase().endsWith('.png') ||
+              f.path.toLowerCase().endsWith('.jpeg'))
+          .toList();
+
+      if (extractedFiles.isNotEmpty) {
+        // Rename first extracted image to our standard name
+        final extractedFile = File(extractedFiles.first.path);
+        extractedFile.renameSync(coverPath);
+        if (File(coverPath).existsSync() &&
+            File(coverPath).lengthSync() > 5000) {
+          print('✅ Extracted cover via attachment: $coverPath');
+          return coverPath;
+        }
+      }
+
+      // Second try: Extract from video stream (fallback for files without attached pictures)
+      result = await Process.run(
+        ffmpegPath,
+        [
+          '-i', filePath,
+          '-vf', 'select=eq(pict_type\\,I)', // Select I-frames
+          '-frames:v', '1', // Only first frame
+          '-q:v', '2', // High quality
+          '-y',
+          coverPath,
+        ],
+        runInShell: true,
+      );
+
+      if (result.exitCode == 0 && File(coverPath).existsSync()) {
+        final fileSize = File(coverPath).lengthSync();
+        if (fileSize > 5000) {
+          // At least 5KB to ensure it's a real image
+          print('✅ Extracted cover via video frame: $coverPath');
+          return coverPath;
+        } else {
+          print(
+              '⚠️  Extracted file too small ($fileSize bytes), probably empty');
+        }
+      }
+    } catch (e) {
+      print('❌ Error extracting cover: $e');
+    }
+
+    return null;
+  }
+
   static Future<void> embedMetadata(
-      String filePath, String? coverPath, MatchResult metadata) async {
+      String filePath, String? coverPath, MatchResult metadata,
+      {SettingsService? settings}) async {
     print("\n" + "=" * 60);
     print("🎬 EMBEDDING: ${p.basename(filePath)}");
     print("=" * 60);
@@ -469,9 +941,9 @@ class CoreBackend {
       return;
     }
 
-    // Check FFmpeg (with caching)
-    if (!await _checkFFmpegAvailable()) {
-      print("❌ FFmpeg not found - Install FFmpeg and add to PATH");
+    // Check FFmpeg (with settings)
+    if (!await _checkFFmpegAvailable(settings: settings)) {
+      print("❌ FFmpeg not found - Configure in Settings or add to PATH");
       print("=" * 60 + "\n");
       return;
     }
