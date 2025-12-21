@@ -347,7 +347,6 @@ class FileStateService with ChangeNotifier {
 
     int filesWithMetadata = 0;
     int filesAdded = 0;
-    bool ffmpegMissing = false;
 
     debugPrint("\n📁 Adding ${files.length} files...");
 
@@ -384,18 +383,6 @@ class FileStateService with ChangeNotifier {
                 _matchResults.add(MatchResult(newName: ""));
               }
               debugPrint("    ✗ No metadata found");
-              // Check if it was due to missing FFmpeg
-              if (!ffmpegMissing) {
-                // Try to detect if FFmpeg is the issue (rough check)
-                try {
-                  final result = await Process.run('ffprobe', ['-version']);
-                  if (result.exitCode != 0) {
-                    ffmpegMissing = true;
-                  }
-                } catch (e) {
-                  ffmpegMissing = true;
-                }
-              }
             }
           } catch (e) {
             debugPrint("    ❌ Error reading metadata: $e");
@@ -403,7 +390,6 @@ class FileStateService with ChangeNotifier {
             while (_matchResults.length < _inputFiles.length) {
               _matchResults.add(MatchResult(newName: ""));
             }
-            ffmpegMissing = true;
           }
         } else {
           debugPrint("  ⊘ Skipped (duplicate): ${p.basename(file.path)}");
@@ -417,7 +403,6 @@ class FileStateService with ChangeNotifier {
       _lastAddResult = {
         'added': filesAdded,
         'withMetadata': filesWithMetadata,
-        'ffmpegMissing': ffmpegMissing ? 1 : 0,
       };
     } finally {
       _isAddingFiles = false;
@@ -430,6 +415,60 @@ class FileStateService with ChangeNotifier {
 
   void clearLastAddResult() {
     _lastAddResult = null;
+  }
+
+  /// Extract covers in background for all files that don't have them yet
+  Future<void> extractCoversInBackground({SettingsService? settings}) async {
+    debugPrint("\n🖼️  Starting background cover extraction...");
+
+    for (int i = 0; i < _inputFiles.length; i++) {
+      // Skip if already has cover bytes or is renamed
+      if (i < _matchResults.length) {
+        final match = _matchResults[i];
+        if (match.coverBytes != null || _inputFiles[i].isRenamed) {
+          continue;
+        }
+
+        // Extract cover for this file
+        try {
+          final String filePath = _inputFiles[i].fullFilePath;
+          debugPrint("  Extracting cover for: ${p.basename(filePath)}");
+
+          final coverBytes = await CoreBackend.extractCover(filePath, settings: settings);
+
+          if (coverBytes != null) {
+            // Update match result with cover bytes
+            _matchResults[i] = MatchResult(
+              newName: match.newName,
+              title: match.title,
+              year: match.year,
+              season: match.season,
+              episode: match.episode,
+              episodeTitle: match.episodeTitle,
+              type: match.type,
+              description: match.description,
+              genres: match.genres,
+              director: match.director,
+              actors: match.actors,
+              rating: match.rating,
+              contentRating: match.contentRating,
+              posterUrl: match.posterUrl,
+              coverBytes: coverBytes, // Add extracted cover
+            );
+
+            // Notify UI to update this card
+            notifyListeners();
+            debugPrint("    ✅ Cover extracted");
+          } else {
+            debugPrint("    ⚠️  No cover found");
+          }
+        } catch (e) {
+          debugPrint("    ❌ Error extracting cover: $e");
+        }
+      }
+    }
+
+    debugPrint("🖼️  Background cover extraction complete\n");
   }
 
   void setMatchResults(List<MatchResult> results) {

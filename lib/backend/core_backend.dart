@@ -467,6 +467,57 @@ class CoreBackend {
     }
   }
 
+  /// Generic tool path resolver - checks custom path and bundled only
+  /// Returns null if tool not found (we skip PATH check to avoid hangs)
+  static Future<String?> _resolveToolPath(
+    String toolName,
+    String? customPath,
+  ) async {
+    // 1. Try custom path from settings
+    if (customPath != null && customPath.isNotEmpty) {
+      // Try bin/ subdirectory first (like FFmpeg structure)
+      final binPath = p.join(customPath, 'bin', '$toolName.exe');
+      if (File(binPath).existsSync()) {
+        print('✅ Using custom $toolName: $binPath');
+        return binPath;
+      }
+
+      // Try direct path in folder
+      final directPath = p.join(customPath, '$toolName.exe');
+      if (File(directPath).existsSync()) {
+        print('✅ Using custom $toolName: $directPath');
+        return directPath;
+      }
+    }
+
+    // 2. Try bundled tool in app directory
+    try {
+      final exePath = Platform.resolvedExecutable;
+      final exeDir = p.dirname(exePath);
+      final bundledTool = p.join(exeDir, '$toolName.exe');
+
+      if (File(bundledTool).existsSync()) {
+        print('✅ Using bundled $toolName: $bundledTool');
+        return bundledTool;
+      }
+    } catch (e) {
+      // Tool not found
+    }
+
+    // Tool not found - return null to trigger FFmpeg fallback
+    return null;
+  }
+
+  /// Resolve mkvpropedit path (custom → bundled → PATH)
+  static Future<String?> _resolveMkvpropedit({SettingsService? settings}) async {
+    return _resolveToolPath('mkvpropedit', settings?.mkvpropeditPath);
+  }
+
+  /// Resolve AtomicParsley path (custom → bundled → PATH)
+  static Future<String?> _resolveAtomicParsley({SettingsService? settings}) async {
+    return _resolveToolPath('AtomicParsley', settings?.atomicparsleyPath);
+  }
+
   /// Escape special characters for FFmpeg metadata
   static String _escapeMetadata(String value) {
     return value
@@ -538,46 +589,10 @@ class CoreBackend {
       }
     }
 
-    // 3. Fall back to FFprobe in system PATH
+    // 3. If still not found, just try "ffprobe" (assume it's in PATH)
     if (ffprobePath == null) {
-      try {
-        // Try using "where" command to find ffprobe in PATH
-        var result = await Process.run('where', ['ffprobe'], runInShell: true);
-        if (result.exitCode == 0) {
-          final paths = (result.stdout as String).trim().split('\n');
-          if (paths.isNotEmpty) {
-            ffprobePath = paths.first.trim();
-            print('✅ Using FFprobe from PATH: $ffprobePath');
-          }
-        }
-      } catch (e) {
-        print('⚠️  Error checking PATH for FFprobe: $e');
-      }
-    }
-
-    // 4. Last resort: try just "ffprobe" and hope it's in PATH
-    if (ffprobePath == null) {
-      try {
-        var result =
-            await Process.run('ffprobe', ['-version'], runInShell: true);
-        if (result.exitCode == 0) {
-          ffprobePath = 'ffprobe';
-          print('✅ FFprobe found in PATH');
-        }
-      } catch (e) {
-        print("❌ FFprobe not found anywhere!");
-        print("   Please configure FFprobe in Settings → FFmpeg Configuration");
-        print("   Or install FFmpeg and add it to your system PATH");
-        print("   Download from: https://ffmpeg.org/download.html");
-        print("=" * 60 + "\n");
-        return null;
-      }
-    }
-
-    if (ffprobePath == null) {
-      print("❌ FFprobe not available - Cannot read metadata");
-      print("=" * 60 + "\n");
-      return null;
+      ffprobePath = 'ffprobe';
+      print('⚠️  FFprobe not found in custom/bundled paths, trying system PATH...');
     }
 
     // Run FFprobe to get metadata
@@ -713,40 +728,41 @@ class CoreBackend {
       }
       print("=" * 60 + "\n");
 
-      // Generate a proper newName based on the metadata
+      // Generate newName using user format settings (if provided)
       String newName;
+      final ext = p.extension(filePath);
+
       if (type == 'episode' && season != null && episode != null) {
-        // TV Show format
-        final showTitle = title ?? show ?? 'Unknown Show';
-        final s = season.toString().padLeft(2, '0');
-        final e = episode.toString().padLeft(2, '0');
-        final ext = p.extension(filePath);
-        newName = '${showTitle} - S${s}E${e}$ext';
-        if (episodeTitle != null && episodeTitle.isNotEmpty) {
-          newName = '${showTitle} - S${s}E${e} - $episodeTitle$ext';
-        }
+        // TV Show format - use user's series format template
+        final String formatTemplate = settings?.seriesFormat ??
+            "{series_name} - S{season_number}E{episode_number} - {episode_title}";
+
+        Map<String, dynamic> context = {
+          'series_name': title ?? show ?? 'Unknown Show',
+          'season_number': season.toString().padLeft(2, '0'),
+          'episode_number': episode.toString().padLeft(2, '0'),
+          'episode_title': episodeTitle ?? '',
+        };
+
+        newName = createFormattedTitle(formatTemplate, context) + ext;
       } else {
-        // Movie format
-        final movieTitle = title ?? 'Unknown Movie';
-        final ext = p.extension(filePath);
-        if (year != null) {
-          newName = '$movieTitle ($year)$ext';
-        } else {
-          newName = '$movieTitle$ext';
-        }
+        // Movie format - use user's movie format template
+        final String formatTemplate = settings?.movieFormat ?? "{movie_name} ({year})";
+
+        Map<String, dynamic> context = {
+          'movie_name': title ?? 'Unknown Movie',
+          'year': year?.toString() ?? '',
+        };
+
+        newName = createFormattedTitle(formatTemplate, context) + ext;
       }
 
       print("📝 Generated newName: $newName");
       print("=" * 60 + "\n");
 
-      // Try to extract embedded cover art as bytes
+      // Note: Cover extraction is skipped during initial file import for speed
+      // Covers will be extracted later when needed (during rename/embed operations)
       Uint8List? coverBytes;
-      try {
-        coverBytes = await CoverExtractor.extractCoverBytes(filePath,
-            settings: settings);
-      } catch (e) {
-        print("⚠️  Could not extract cover art: $e");
-      }
 
       // Create MatchResult with existing metadata
       return MatchResult(
@@ -787,7 +803,13 @@ class CoreBackend {
     }
   }
 
-  /// Extract embedded cover art from media file
+  /// Extract cover bytes from media file (wrapper around CoverExtractor)
+  static Future<Uint8List?> extractCover(String filePath,
+      {SettingsService? settings}) async {
+    return await CoverExtractor.extractCoverBytes(filePath, settings: settings);
+  }
+
+  /// Extract embedded cover art from media file and save to disk
   static Future<String?> extractCoverArt(String filePath,
       {SettingsService? settings}) async {
     // Check FFmpeg availability
@@ -914,6 +936,133 @@ class CoreBackend {
     return null;
   }
 
+  /// Embed metadata into MKV file using mkvpropedit (instant in-place editing)
+  static Future<bool> _embedMetadataMkv(
+    String filePath,
+    String? coverPath,
+    MatchResult metadata,
+    {SettingsService? settings}
+  ) async {
+    String? toolPath = await _resolveMkvpropedit(settings: settings);
+    if (toolPath == null) {
+      print('⚠️  mkvpropedit not available');
+      return false;
+    }
+
+    List<String> args = [filePath, '--edit', 'info'];
+
+    // Add metadata fields to MKV info section
+    if (metadata.title != null && metadata.title!.isNotEmpty) {
+      args.addAll(['--set', 'title=${metadata.title}']);
+    }
+
+    // Note: mkvpropedit has limited metadata support in info section
+    // For comprehensive metadata, we'd need to create XML tags
+    // For now, we'll just set the title which is the most important field
+
+    // Add cover art attachment
+    if (coverPath != null && File(coverPath).existsSync()) {
+      args.addAll([
+        '--add-attachment', coverPath,
+        '--attachment-name', 'cover.jpg',
+        '--attachment-mime-type', 'image/jpeg'
+      ]);
+    }
+
+    try {
+      var result = await Process.run(toolPath, args, runInShell: true);
+
+      if (result.exitCode == 0) {
+        print('✅ MKV metadata embedded instantly with mkvpropedit');
+        return true;
+      } else {
+        print('❌ mkvpropedit failed (exit ${result.exitCode})');
+        if (result.stderr.toString().isNotEmpty) {
+          print('Error: ${result.stderr}');
+        }
+        return false;
+      }
+    } catch (e) {
+      print('❌ Error running mkvpropedit: $e');
+      return false;
+    }
+  }
+
+  /// Embed metadata into MP4 file using AtomicParsley (fast single-pass editing)
+  static Future<bool> _embedMetadataMp4(
+    String filePath,
+    String? coverPath,
+    MatchResult metadata,
+    {SettingsService? settings}
+  ) async {
+    String? toolPath = await _resolveAtomicParsley(settings: settings);
+    if (toolPath == null) {
+      print('⚠️  AtomicParsley not available');
+      return false;
+    }
+
+    List<String> args = [filePath];
+
+    // Map metadata fields to AtomicParsley arguments
+    if (metadata.title != null && metadata.title!.isNotEmpty) {
+      args.addAll(['--title', metadata.title!]);
+    }
+
+    if (metadata.year != null) {
+      args.addAll(['--year', metadata.year.toString()]);
+    }
+
+    if (metadata.description != null && metadata.description!.isNotEmpty) {
+      args.addAll(['--description', metadata.description!]);
+      args.addAll(['--longdesc', metadata.description!]);
+    }
+
+    if (metadata.genres != null && metadata.genres!.isNotEmpty) {
+      args.addAll(['--genre', metadata.genres!.first]);
+    }
+
+    if (metadata.director != null && metadata.director!.isNotEmpty) {
+      args.addAll(['--artist', metadata.director!]);
+    }
+
+    // TV Show specifics
+    if (metadata.season != null && metadata.episode != null) {
+      args.addAll(['--TVShowName', metadata.title ?? '']);
+      args.addAll(['--TVSeasonNum', metadata.season.toString()]);
+      args.addAll(['--TVEpisodeNum', metadata.episode.toString()]);
+      if (metadata.episodeTitle != null && metadata.episodeTitle!.isNotEmpty) {
+        args.addAll(['--TVEpisode', metadata.episodeTitle!]);
+      }
+    }
+
+    // Add cover art
+    if (coverPath != null && File(coverPath).existsSync()) {
+      args.addAll(['--artwork', coverPath]);
+    }
+
+    // Overwrite in place
+    args.add('--overWrite');
+
+    try {
+      var result = await Process.run(toolPath, args, runInShell: true);
+
+      if (result.exitCode == 0) {
+        print('✅ MP4 metadata embedded fast with AtomicParsley');
+        return true;
+      } else {
+        print('❌ AtomicParsley failed (exit ${result.exitCode})');
+        if (result.stderr.toString().isNotEmpty) {
+          print('Error: ${result.stderr}');
+        }
+        return false;
+      }
+    } catch (e) {
+      print('❌ Error running AtomicParsley: $e');
+      return false;
+    }
+  }
+
+  /// Main metadata embedding dispatcher - tries format-specific tools first, falls back to FFmpeg
   static Future<void> embedMetadata(
       String filePath, String? coverPath, MatchResult metadata,
       {SettingsService? settings}) async {
@@ -940,6 +1089,33 @@ class CoreBackend {
       print("=" * 60 + "\n");
       return;
     }
+
+    bool success = false;
+
+    // Try format-specific tool first for maximum speed
+    if (ext == '.mkv') {
+      print("🔧 Attempting mkvpropedit (instant in-place editing)...");
+      success = await _embedMetadataMkv(filePath, coverPath, metadata, settings: settings);
+    } else if (ext == '.mp4') {
+      print("🔧 Attempting AtomicParsley (fast single-pass)...");
+      success = await _embedMetadataMp4(filePath, coverPath, metadata, settings: settings);
+    }
+
+    // Fall back to FFmpeg if specialized tool failed or unavailable
+    if (!success) {
+      print("⚠️  Falling back to FFmpeg (slower but reliable)...");
+      await _embedMetadataFFmpeg(filePath, coverPath, metadata, settings: settings);
+    }
+
+    print("=" * 60 + "\n");
+  }
+
+  /// Embed metadata using FFmpeg (fallback method - slower but universal)
+  static Future<void> _embedMetadataFFmpeg(
+      String filePath, String? coverPath, MatchResult metadata,
+      {SettingsService? settings}) async {
+    String ext = p.extension(filePath).toLowerCase();
+    bool hasCover = coverPath != null && File(coverPath).existsSync();
 
     // Check FFmpeg (with settings)
     if (!await _checkFFmpegAvailable(settings: settings)) {
@@ -1102,7 +1278,5 @@ class CoreBackend {
         } catch (_) {}
       }
     }
-
-    print("=" * 60 + "\n");
   }
 }

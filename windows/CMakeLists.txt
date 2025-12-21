@@ -119,3 +119,21 @@ if(EXISTS "${FFMPEG_DIR}/ffprobe.exe")
     COMPONENT Runtime)
   message(STATUS "FFprobe will be bundled with the application")
 endif()
+
+# Install mkvpropedit, mkvextract, and AtomicParsley (if available)
+set(TOOLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+if(EXISTS "${TOOLS_DIR}/mkvpropedit.exe")
+  install(FILES "${TOOLS_DIR}/mkvpropedit.exe" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+  message(STATUS "mkvpropedit will be bundled with the application")
+endif()
+if(EXISTS "${TOOLS_DIR}/mkvextract.exe")
+  install(FILES "${TOOLS_DIR}/mkvextract.exe" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+  message(STATUS "mkvextract will be bundled with the application")
+endif()
+if(EXISTS "${TOOLS_DIR}/AtomicParsley.exe")
+  install(FILES "${TOOLS_DIR}/AtomicParsley.exe" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+  message(STATUS "AtomicParsley will be bundled with the application")
+endif()

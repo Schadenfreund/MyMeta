@@ -1,20 +1,9 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path/path.dart' as p;
 
 class SettingsService with ChangeNotifier {
-  static const String _themeKey = 'theme';
-  static const String _seriesFormatKey = 'series_format';
-  static const String _movieFormatKey = 'movie_format';
-  static const String _excludedFoldersKey = 'excluded_folders';
-  static const String _filenameAnalysisOnlyKey = 'filename_analysis_only';
-  static const String _tmdbApiKeyKey = 'tmdb_api_key';
-  static const String _omdbApiKeyKey = 'omdb_api_key';
-  static const String _metadataSourceKey = 'metadata_source';
-  static const String _accentColorKey = 'accent_color';
-  static const String _ffmpegPathKey = 'ffmpeg_folder_path'; // Folder path only
-
-  late SharedPreferences _prefs;
-
   // Defaults
   ThemeMode _themeMode = ThemeMode.dark;
   String _seriesFormat =
@@ -27,6 +16,8 @@ class SettingsService with ChangeNotifier {
   String _metadataSource = "tmdb";
   Color _accentColor = const Color(0xFF6366F1); // Indigo default
   String _ffmpegPath = ""; // Stores the folder path
+  String _mkvpropeditPath = "";
+  String _atomicparsleyPath = "";
 
   ThemeMode get themeMode => _themeMode;
   String get seriesFormat => _seriesFormat;
@@ -38,115 +29,209 @@ class SettingsService with ChangeNotifier {
   String get metadataSource => _metadataSource;
   Color get accentColor => _accentColor;
   String get ffmpegPath => _ffmpegPath; // Returns folder path
+  String get mkvpropeditPath => _mkvpropeditPath;
+  String get atomicparsleyPath => _atomicparsleyPath;
 
-  Future<void> loadSettings() async {
-    _prefs = await SharedPreferences.getInstance();
+  /// Get the portable UserData folder path (next to executable)
+  Future<String> _getUserDataPath() async {
+    final exePath = Platform.resolvedExecutable;
+    final exeDir = p.dirname(exePath);
+    final userDataDir = p.join(exeDir, 'UserData');
 
-    // Theme
-    String? themeStr = _prefs.getString(_themeKey);
-    if (themeStr == 'Light')
-      _themeMode = ThemeMode.light;
-    else
-      _themeMode = ThemeMode.dark;
-
-    // Formats
-    _seriesFormat = _prefs.getString(_seriesFormatKey) ?? _seriesFormat;
-    _movieFormat = _prefs.getString(_movieFormatKey) ?? _movieFormat;
-
-    // Excluded Folders
-    _excludedFolders = _prefs.getStringList(_excludedFoldersKey) ?? [];
-
-    // Filename Analysis Only
-    _filenameAnalysisOnly = _prefs.getBool(_filenameAnalysisOnlyKey) ?? false;
-
-    // API Key
-    _tmdbApiKey = _prefs.getString(_tmdbApiKeyKey) ?? "";
-    _omdbApiKey = _prefs.getString(_omdbApiKeyKey) ?? "";
-    _metadataSource = _prefs.getString(_metadataSourceKey) ?? "tmdb";
-
-    // Accent Color
-    int? colorValue = _prefs.getInt(_accentColorKey);
-    if (colorValue != null) {
-      _accentColor = Color(colorValue);
+    // Create directory if it doesn't exist
+    final dir = Directory(userDataDir);
+    if (!dir.existsSync()) {
+      dir.createSync(recursive: true);
     }
 
-    // FFmpeg Paths
-    _ffmpegPath = _prefs.getString(_ffmpegPathKey) ?? "";
+    return userDataDir;
+  }
 
-    notifyListeners();
+  /// Get the settings file path
+  Future<File> _getSettingsFile() async {
+    final userDataPath = await _getUserDataPath();
+    return File(p.join(userDataPath, 'settings.json'));
+  }
+
+  Future<void> loadSettings() async {
+    try {
+      final settingsFile = await _getSettingsFile();
+
+      if (!settingsFile.existsSync()) {
+        debugPrint('Settings file not found, using defaults');
+        notifyListeners();
+        return;
+      }
+
+      final jsonString = await settingsFile.readAsString();
+      final Map<String, dynamic> data = json.decode(jsonString);
+
+      // Theme
+      if (data['theme'] == 'light') {
+        _themeMode = ThemeMode.light;
+      } else {
+        _themeMode = ThemeMode.dark;
+      }
+
+      // Formats
+      _seriesFormat = data['series_format'] ?? _seriesFormat;
+      _movieFormat = data['movie_format'] ?? _movieFormat;
+
+      // Excluded Folders
+      if (data['excluded_folders'] != null) {
+        _excludedFolders = List<String>.from(data['excluded_folders']);
+      }
+
+      // Filename Analysis Only
+      _filenameAnalysisOnly = data['filename_analysis_only'] ?? false;
+
+      // API Keys
+      _tmdbApiKey = data['tmdb_api_key'] ?? "";
+      _omdbApiKey = data['omdb_api_key'] ?? "";
+      _metadataSource = data['metadata_source'] ?? "tmdb";
+
+      // Accent Color
+      if (data['accent_color'] != null) {
+        _accentColor = Color(data['accent_color'] as int);
+      }
+
+      // Tool Paths
+      _ffmpegPath = data['ffmpeg_path'] ?? "";
+      _mkvpropeditPath = data['mkvpropedit_path'] ?? "";
+      _atomicparsleyPath = data['atomicparsley_path'] ?? "";
+
+      notifyListeners();
+      debugPrint('✅ Settings loaded from UserData folder');
+    } catch (e) {
+      debugPrint('⚠️  Error loading settings: $e');
+      notifyListeners();
+    }
+  }
+
+  Future<void> _saveSettings() async {
+    try {
+      final settingsFile = await _getSettingsFile();
+
+      final Map<String, dynamic> data = {
+        'theme': _themeMode == ThemeMode.light ? 'light' : 'dark',
+        'series_format': _seriesFormat,
+        'movie_format': _movieFormat,
+        'excluded_folders': _excludedFolders,
+        'filename_analysis_only': _filenameAnalysisOnly,
+        'tmdb_api_key': _tmdbApiKey,
+        'omdb_api_key': _omdbApiKey,
+        'metadata_source': _metadataSource,
+        'accent_color': _accentColor.toARGB32(),
+        'ffmpeg_path': _ffmpegPath,
+        'mkvpropedit_path': _mkvpropeditPath,
+        'atomicparsley_path': _atomicparsleyPath,
+      };
+
+      const jsonEncoder = JsonEncoder.withIndent('  ');
+      final jsonString = jsonEncoder.convert(data);
+      await settingsFile.writeAsString(jsonString);
+
+      debugPrint('💾 Settings saved to UserData folder');
+    } catch (e) {
+      debugPrint('⚠️  Error saving settings: $e');
+    }
   }
 
   Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;
-    await _prefs.setString(
-        _themeKey, mode == ThemeMode.light ? 'Light' : 'Dark');
+    await _saveSettings();
     notifyListeners();
   }
 
   Future<void> setSeriesFormat(String format) async {
     _seriesFormat = format;
-    await _prefs.setString(_seriesFormatKey, format);
+    await _saveSettings();
     notifyListeners();
   }
 
   Future<void> setMovieFormat(String format) async {
     _movieFormat = format;
-    await _prefs.setString(_movieFormatKey, format);
+    await _saveSettings();
     notifyListeners();
   }
 
   Future<void> addExcludedFolder(String path) async {
     if (!_excludedFolders.contains(path)) {
       _excludedFolders.add(path);
-      await _prefs.setStringList(_excludedFoldersKey, _excludedFolders);
+      await _saveSettings();
       notifyListeners();
     }
   }
 
   Future<void> removeExcludedFolder(String path) async {
     _excludedFolders.remove(path);
-    await _prefs.setStringList(_excludedFoldersKey, _excludedFolders);
+    await _saveSettings();
     notifyListeners();
   }
 
   Future<void> setFilenameAnalysisOnly(bool value) async {
     _filenameAnalysisOnly = value;
-    await _prefs.setBool(_filenameAnalysisOnlyKey, value);
+    await _saveSettings();
     notifyListeners();
   }
 
   Future<void> setTmdbApiKey(String key) async {
     _tmdbApiKey = key;
-    await _prefs.setString(_tmdbApiKeyKey, key);
+    await _saveSettings();
     notifyListeners();
   }
 
   Future<void> setOmdbApiKey(String key) async {
     _omdbApiKey = key;
-    await _prefs.setString(_omdbApiKeyKey, key);
+    await _saveSettings();
     notifyListeners();
   }
 
   Future<void> setMetadataSource(String source) async {
     _metadataSource = source;
-    await _prefs.setString(_metadataSourceKey, source);
+    await _saveSettings();
     notifyListeners();
   }
 
   Future<void> setAccentColor(Color color) async {
     _accentColor = color;
-    await _prefs.setInt(_accentColorKey, color.value);
+    await _saveSettings();
     notifyListeners();
   }
 
   Future<void> setFFmpegPath(String path) async {
     _ffmpegPath = path;
-    await _prefs.setString(_ffmpegPathKey, path);
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> setMkvpropeditPath(String path) async {
+    _mkvpropeditPath = path;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> setAtomicParsleyPath(String path) async {
+    _atomicparsleyPath = path;
+    await _saveSettings();
     notifyListeners();
   }
 
   Future<void> resetSettings() async {
-    await _prefs.clear();
-    await loadSettings();
+    _themeMode = ThemeMode.dark;
+    _seriesFormat = "{series_name} - S{season_number}E{episode_number} - {episode_title}";
+    _movieFormat = "{movie_name} ({year})";
+    _excludedFolders = [];
+    _filenameAnalysisOnly = false;
+    _tmdbApiKey = "";
+    _omdbApiKey = "";
+    _metadataSource = "tmdb";
+    _accentColor = const Color(0xFF6366F1);
+    _ffmpegPath = "";
+    _mkvpropeditPath = "";
+    _atomicparsleyPath = "";
+
+    await _saveSettings();
+    notifyListeners();
   }
 }

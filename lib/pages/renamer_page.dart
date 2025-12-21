@@ -57,6 +57,9 @@ class _RenamerPageState extends State<RenamerPage> {
               }
             });
           }
+
+          // Extract covers in background (non-blocking)
+          fileState.extractCoversInBackground(settings: settings);
         }
 
         fileState.clearLastAddResult();
@@ -102,6 +105,9 @@ class _RenamerPageState extends State<RenamerPage> {
             }
           });
         }
+
+        // Extract covers in background (non-blocking)
+        fileState.extractCoversInBackground(settings: settings);
       }
 
       fileState.clearLastAddResult();
