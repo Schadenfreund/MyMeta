@@ -49,9 +49,9 @@ class _ToolPathsCardState extends State<ToolPathsCard> {
   String? _errorMessage;
 
   bool get _areAllToolsConfigured =>
-      widget.ffmpegPath.isNotEmpty &&
-      widget.mkvpropeditPath.isNotEmpty &&
-      widget.atomicparsleyPath.isNotEmpty;
+      widget.mkvpropeditPath.isNotEmpty ||
+      widget.atomicparsleyPath.isNotEmpty ||
+      widget.ffmpegPath.isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -121,7 +121,7 @@ class _ToolPathsCardState extends State<ToolPathsCard> {
                           const SizedBox(width: 12),
                           Flexible(
                             child: Text(
-                              'Configure locations for FFmpeg, MKVToolNix, and AtomicParsley',
+                              'Configure locations for MKVToolNix, AtomicParsley, and FFmpeg',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
@@ -212,26 +212,7 @@ class _ToolPathsCardState extends State<ToolPathsCard> {
                     const SizedBox(height: AppSpacing.lg),
                   ],
 
-                  // FFmpeg
-                  _buildToolSection(
-                    context,
-                    'FFmpeg',
-                    widget.ffmpegPath,
-                    'Select FFmpeg Folder (contains bin/ffmpeg.exe)',
-                    widget.onFFmpegPathChanged,
-                    true, // required
-                    widget.ffmpegAvailable,
-                  ),
-
-                  const SizedBox(height: AppSpacing.lg),
-                  Divider(
-                    height: 1,
-                    color:
-                        isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-
-                  // MKVToolNix
+                  // MKVToolNix (required)
                   _buildToolSection(
                     context,
                     'MKVToolNix',
@@ -250,7 +231,7 @@ class _ToolPathsCardState extends State<ToolPathsCard> {
                   ),
                   const SizedBox(height: AppSpacing.lg),
 
-                  // AtomicParsley
+                  // AtomicParsley (optional)
                   _buildToolSection(
                     context,
                     'AtomicParsley',
@@ -259,6 +240,25 @@ class _ToolPathsCardState extends State<ToolPathsCard> {
                     widget.onAtomicparsleyPathChanged,
                     false, // optional
                     widget.atomicparsleyAvailable,
+                  ),
+
+                  const SizedBox(height: AppSpacing.lg),
+                  Divider(
+                    height: 1,
+                    color:
+                        isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // FFmpeg (optional - fallback)
+                  _buildToolSection(
+                    context,
+                    'FFmpeg',
+                    widget.ffmpegPath,
+                    'Select FFmpeg Folder (contains bin/ffmpeg.exe)',
+                    widget.onFFmpegPathChanged,
+                    false, // optional
+                    widget.ffmpegAvailable,
                   ),
 
                   const SizedBox(height: AppSpacing.lg),
@@ -279,100 +279,104 @@ class _ToolPathsCardState extends State<ToolPathsCard> {
                         color: settings.accentColor.withOpacity(0.2),
                       ),
                     ),
-                    child: Theme(
-                      data: Theme.of(context).copyWith(
-                        dividerColor: Colors.transparent,
-                      ),
-                      child: ExpansionTile(
-                        tilePadding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.md,
-                          vertical: AppSpacing.xs,
+                    child: ExcludeSemantics(
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
                         ),
-                        childrenPadding: const EdgeInsets.only(
-                          left: AppSpacing.md,
-                          right: AppSpacing.md,
-                          bottom: AppSpacing.md,
-                        ),
-                        leading: Icon(
-                          Icons.link,
-                          size: 20,
-                          color: settings.accentColor,
-                        ),
-                        title: Text(
-                          'Download URLs',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: settings.accentColor,
-                                  ),
-                        ),
-                        iconColor: settings.accentColor,
-                        collapsedIconColor: settings.accentColor,
-                        children: [
-                          // Info box
-                          Container(
-                            padding: const EdgeInsets.all(AppSpacing.sm),
-                            decoration: BoxDecoration(
-                              color: settings.accentColor.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: settings.accentColor.withOpacity(0.3),
-                              ),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(
-                                  Icons.info_outline,
-                                  size: 16,
+                        child: ExpansionTile(
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md,
+                            vertical: AppSpacing.xs,
+                          ),
+                          childrenPadding: const EdgeInsets.only(
+                            left: AppSpacing.md,
+                            right: AppSpacing.md,
+                            bottom: AppSpacing.md,
+                          ),
+                          leading: Icon(
+                            Icons.link,
+                            size: 20,
+                            color: settings.accentColor,
+                          ),
+                          title: Text(
+                            'Download URLs',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w600,
                                   color: settings.accentColor,
                                 ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'Click the download button to get tools manually. Extract to UserData/tools folder or use the Setup button above for automatic installation.',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          fontSize: 11,
-                                          color: isDark
-                                              ? AppColors.darkTextSecondary
-                                              : AppColors.lightTextSecondary,
-                                          height: 1.4,
-                                        ),
-                                  ),
+                          ),
+                          iconColor: settings.accentColor,
+                          collapsedIconColor: settings.accentColor,
+                          children: [
+                            // Info box
+                            Container(
+                              padding: const EdgeInsets.all(AppSpacing.sm),
+                              decoration: BoxDecoration(
+                                color: settings.accentColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: settings.accentColor.withOpacity(0.3),
                                 ),
-                              ],
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.info_outline,
+                                    size: 16,
+                                    color: settings.accentColor,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Click the download button to get tools manually. Extract to UserData/tools folder or use the Setup button above for automatic installation.',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            fontSize: 11,
+                                            color: isDark
+                                                ? AppColors.darkTextSecondary
+                                                : AppColors.lightTextSecondary,
+                                            height: 1.4,
+                                          ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: AppSpacing.md),
+                            const SizedBox(height: AppSpacing.md),
 
-                          // URL inputs
-                          _buildUrlInput(
-                            context,
-                            'FFmpeg URL',
-                            settings.ffmpegUrl,
-                            settings.setFFmpegUrl,
-                            settings.accentColor,
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          _buildUrlInput(
-                            context,
-                            'MKVToolNix URL',
-                            settings.mkvtoolnixUrl,
-                            settings.setMkvtoolnixUrl,
-                            settings.accentColor,
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          _buildUrlInput(
-                            context,
-                            'AtomicParsley URL',
-                            settings.atomicParsleyUrl,
-                            settings.setAtomicParsleyUrl,
-                            settings.accentColor,
-                          ),
-                        ],
+                            // URL inputs
+                            _buildUrlInput(
+                              context,
+                              'FFmpeg URL',
+                              settings.ffmpegUrl,
+                              settings.setFFmpegUrl,
+                              settings.accentColor,
+                            ),
+                            const SizedBox(height: AppSpacing.sm),
+                            _buildUrlInput(
+                              context,
+                              'MKVToolNix URL',
+                              settings.mkvtoolnixUrl,
+                              settings.setMkvtoolnixUrl,
+                              settings.accentColor,
+                            ),
+                            const SizedBox(height: AppSpacing.sm),
+                            _buildUrlInput(
+                              context,
+                              'AtomicParsley URL',
+                              settings.atomicParsleyUrl,
+                              settings.setAtomicParsleyUrl,
+                              settings.accentColor,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -1027,33 +1031,72 @@ class _ToolPathsCardState extends State<ToolPathsCard> {
               ),
             ),
             const SizedBox(width: AppSpacing.xs),
-            ElevatedButton.icon(
-              onPressed: () async {
-                String? selectedDirectory =
-                    await FilePicker.platform.getDirectoryPath(
-                  dialogTitle: dialogTitle,
-                );
-                if (selectedDirectory != null) {
-                  onPathChanged(selectedDirectory);
-                }
-              },
-              icon: const Icon(Icons.folder_open, size: 18),
-              label: const Text('Browse'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md,
-                  vertical: AppSpacing.xs,
+            // Browse button (accent colored, icon only)
+            Tooltip(
+              message: 'Browse Folder',
+              child: Container(
+                decoration: BoxDecoration(
+                  color: settings.accentColor,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: settings.accentColor.withOpacity(0.25),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () async {
+                      String? selectedDirectory =
+                          await FilePicker.platform.getDirectoryPath(
+                        dialogTitle: dialogTitle,
+                      );
+                      if (selectedDirectory != null) {
+                        onPathChanged(selectedDirectory);
+                      }
+                    },
+                    child: const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Icon(
+                        Icons.folder_open,
+                        size: 20,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
             if (path.isNotEmpty) ...[
               const SizedBox(width: AppSpacing.xs),
-              IconButton(
-                icon: const Icon(Icons.close, size: 16),
-                tooltip: 'Clear',
-                onPressed: () => onPathChanged(''),
-                color: AppColors.lightDanger,
-                padding: const EdgeInsets.all(8),
+              // Clear button (subtle grey, icon only)
+              Tooltip(
+                message: 'Clear',
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => onPathChanged(''),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Icon(
+                          Icons.close,
+                          size: 20,
+                          color: Colors.white.withOpacity(0.7),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ],
           ],

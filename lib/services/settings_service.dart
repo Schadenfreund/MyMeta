@@ -14,7 +14,7 @@ class SettingsService with ChangeNotifier {
   String _tmdbApiKey = "";
   String _omdbApiKey = "";
   String _metadataSource = "tmdb";
-  Color _accentColor = const Color(0xFFEC4899); // Pink default
+  Color _accentColor = const Color(0xFFBE0AB4); // Custom Pink default
   String _ffmpegPath = ""; // Stores the folder path
   String _mkvpropeditPath = "";
   String _atomicparsleyPath = "";
@@ -294,7 +294,7 @@ class SettingsService with ChangeNotifier {
     _tmdbApiKey = "";
     _omdbApiKey = "";
     _metadataSource = "tmdb";
-    _accentColor = const Color(0xFFEC4899); // Pink default
+    _accentColor = const Color(0xFFBE0AB4); // Custom Pink default
     _ffmpegPath = "";
     _mkvpropeditPath = "";
     _atomicparsleyPath = "";
