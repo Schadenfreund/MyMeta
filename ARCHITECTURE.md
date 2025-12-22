@@ -38,12 +38,18 @@ lib/
 │   ├── formats_page.dart     # Naming format configuration
 │   └── settings_page.dart    # App settings
 ├── widgets/
+│   ├── app_card.dart         # Centralized card components (NEW)
 │   ├── custom_titlebar.dart  # Custom window controls
 │   ├── accent_color_picker.dart  # Color selection widget
+│   ├── about_card.dart       # About information card
+│   ├── tool_paths_card.dart  # Tool configuration card
 │   └── inline_metadata_editor.dart  # Metadata editing UI
-└── services/
-    ├── file_state_service.dart      # File list state management
-    └── settings_service.dart        # App settings persistence
+├── services/
+│   ├── file_state_service.dart      # File list state management
+│   ├── settings_service.dart        # App settings persistence
+│   └── tool_downloader_service.dart # Tool download & setup
+└── theme/
+    └── app_theme.dart        # Centralized theme constants
 ```
 
 ---
@@ -185,6 +191,41 @@ Auto-hide vertical sidebar with:
 - Soft glow effect
 - Hover to reveal
 - Icons + labels
+
+### **Centralized Card Components** ⭐ NEW
+Reusable UI components following DRY principles:
+
+**AppCard** - Main card container
+```dart
+AppCard(
+  title: 'Settings',
+  icon: Icons.settings,
+  description: 'Configure your preferences',
+  accentColor: accentColor,
+  children: [...],
+)
+```
+
+**AppCardHeader** - Inline title + description
+- Bold white title and grey description on same line
+- Consistent spacing and alignment
+- Accent color icon
+
+**AppSettingRow** - Setting with inline labels
+- Title and description inline (not stacked)
+- Control widget on the right
+- Baseline alignment for text
+
+**AppLabeledInput** - Input with inline labels
+- Label and description inline
+- Input field below
+- Consistent spacing
+
+**Benefits:**
+- ✅ DRY - Single source of truth
+- ✅ Consistency - Uniform look across pages
+- ✅ Maintainability - Easy to update globally
+- ✅ Code reduction - ~168 lines saved
 
 ### **State Management**
 Uses Provider pattern:
@@ -374,14 +415,28 @@ flutter build windows --release
 - Constants: `camelCase` or `SCREAMING_SNAKE_CASE`
 
 ### **File Organization**
-- One widget per file
+- One widget per file (exception: small private helper widgets)
 - Group related functionality
 - Clear imports at top
+- Reusable components in `widgets/` folder
 
 ### **State Management**
 - Use Provider for app-wide state
 - Local `setState` for widget-specific state
 - Notify listeners on state changes
+
+### **DRY Principles** ⭐ NEW
+- **Don't Repeat Yourself** - Create reusable components
+- Use centralized widgets (AppCard, AppCardHeader, etc.)
+- Extract common patterns into shared components
+- Single source of truth for styling and layout
+- Understand the architecture before creating new patterns
+
+### **Component Reusability**
+- Use existing components from `widgets/app_card.dart`
+- Follow established patterns for consistency
+- Update existing components rather than creating duplicates
+- Document new reusable components
 
 ---
 

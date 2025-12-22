@@ -36,23 +36,30 @@ class CustomTitleBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            // App Icon with shadow
+            // App Icon with accent background
             Container(
               width: 30,
               height: 30,
+              padding: const EdgeInsets.all(5),
               decoration: BoxDecoration(
+                color: accentColor,
                 borderRadius: BorderRadius.circular(7),
-                image: const DecorationImage(
-                  image: AssetImage('assets/MyMeta.png'),
-                  fit: BoxFit.cover,
-                ),
                 boxShadow: [
+                  BoxShadow(
+                    color: accentColor.withOpacity(0.3),
+                    blurRadius: 8,
+                    spreadRadius: 1,
+                  ),
                   BoxShadow(
                     color: Colors.black.withOpacity(0.1),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   ),
                 ],
+              ),
+              child: Image.asset(
+                'assets/MyMeta Symbol.png',
+                fit: BoxFit.contain,
               ),
             ),
             const SizedBox(width: 12),

@@ -6,6 +6,7 @@ import 'package:cross_file/cross_file.dart';
 import 'settings_service.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
+import 'package:http/http.dart' as http;
 
 class FileStateService with ChangeNotifier {
   final List<MediaRecord> _inputFiles = [];
@@ -96,7 +97,47 @@ class FileStateService with ChangeNotifier {
         while (_matchResults.length <= index) {
           _matchResults.add(MatchResult(newName: ""));
         }
-        _matchResults[index] = results.first;
+
+        MatchResult result = results.first;
+
+        // Download cover immediately if posterUrl is available
+        if (result.posterUrl != null &&
+            result.posterUrl!.isNotEmpty &&
+            result.posterUrl!.startsWith('http')) {
+          try {
+            debugPrint("📥 Downloading cover for: ${result.title}");
+            final response = await http.get(Uri.parse(result.posterUrl!));
+            if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+              // Create new MatchResult with coverBytes
+              result = MatchResult(
+                newName: result.newName,
+                title: result.title,
+                year: result.year,
+                season: result.season,
+                episode: result.episode,
+                episodeTitle: result.episodeTitle,
+                type: result.type,
+                description: result.description,
+                genres: result.genres,
+                director: result.director,
+                actors: result.actors,
+                rating: result.rating,
+                contentRating: result.contentRating,
+                posterUrl: result.posterUrl,
+                tmdbId: result.tmdbId,
+                alternativePosterUrls: result.alternativePosterUrls,
+                searchResults: result.searchResults,
+                coverBytes: response.bodyBytes, // Add downloaded cover
+              );
+              debugPrint(
+                  "✅ Cover downloaded (${response.bodyBytes.length} bytes)");
+            }
+          } catch (e) {
+            debugPrint("⚠️  Failed to download cover: $e");
+          }
+        }
+
+        _matchResults[index] = result;
       }
     } catch (e) {
       debugPrint("Error matching single file: $e");
@@ -126,40 +167,62 @@ class FileStateService with ChangeNotifier {
       // Perform Rename
       CoreBackend.performFileRenaming(oldPaths, newNames);
 
+      // Create UserData/Cache folder for temporary cover files
+      final exePath = Platform.resolvedExecutable;
+      final appDir = p.dirname(exePath);
+      final cacheDir = Directory(p.join(appDir, 'UserData', 'Cache'));
+
+      // Create cache directory if it doesn't exist
+      if (!cacheDir.existsSync()) {
+        cacheDir.createSync(recursive: true);
+        debugPrint("📁 Created cache directory: ${cacheDir.path}");
+      }
+
       // Download or Copy Posters and Embed
       // Track which cover files we've created so we can clean them up later
       Set<String> coverFilesCreated = {};
 
       for (int i = 0; i < _inputFiles.length; i++) {
-        String? posterUrl = _matchResults[i].posterUrl;
         String parentDir = p.dirname(oldPaths[i]);
         String newName = newNames[i];
         String newFullPath = p.join(parentDir, newName);
 
-        // Handle cover art
-        File coverFile = File(p.join(parentDir, 'cover.jpg'));
-        if (posterUrl != null && posterUrl.isNotEmpty) {
-          // If cover URL provided, download/copy it
-          if (posterUrl.startsWith('http')) {
-            // Download
-            await CoreBackend.downloadCover(posterUrl, coverFile.path);
+        // Use filename as unique identifier for the cover (avoid conflicts)
+        final fileName = p.basenameWithoutExtension(newName);
+        File coverFile = File(p.join(cacheDir.path, '${fileName}_cover.jpg'));
+
+        // Priority 1: Use coverBytes if available
+        if (_matchResults[i].coverBytes != null) {
+          try {
+            coverFile.writeAsBytesSync(_matchResults[i].coverBytes!);
             if (coverFile.existsSync()) {
               coverFilesCreated.add(coverFile.path);
+              debugPrint("✅ Cover written from bytes: ${coverFile.path}");
             }
-          } else if (File(posterUrl).existsSync()) {
-            // Copy local file
-            File(posterUrl).copySync(coverFile.path);
-            if (coverFile.existsSync()) {
-              coverFilesCreated.add(coverFile.path);
-            }
-          } else {
-            debugPrint("⚠️  Poster URL not accessible: $posterUrl");
+          } catch (e) {
+            debugPrint("⚠️  Failed to write cover from bytes: $e");
           }
-        } else if (posterUrl != null) {
-          // posterUrl is set but empty string - indicates existing cover
-          if (coverFile.existsSync()) {
-            debugPrint("ℹ️  Cover already exists: ${coverFile.path}");
-            coverFilesCreated.add(coverFile.path);
+        }
+        // Priority 2: Download/copy from posterUrl
+        else {
+          String? posterUrl = _matchResults[i].posterUrl;
+          if (posterUrl != null && posterUrl.isNotEmpty) {
+            // If cover URL provided, download/copy it
+            if (posterUrl.startsWith('http')) {
+              // Download
+              await CoreBackend.downloadCover(posterUrl, coverFile.path);
+              if (coverFile.existsSync()) {
+                coverFilesCreated.add(coverFile.path);
+              }
+            } else if (File(posterUrl).existsSync()) {
+              // Copy local file
+              File(posterUrl).copySync(coverFile.path);
+              if (coverFile.existsSync()) {
+                coverFilesCreated.add(coverFile.path);
+              }
+            } else {
+              debugPrint("⚠️  Poster URL not accessible: $posterUrl");
+            }
           }
         }
 
@@ -250,22 +313,56 @@ class FileStateService with ChangeNotifier {
       // Perform Rename
       CoreBackend.performFileRenaming([oldPath], [newName]);
 
-      // Handle cover art
-      String? posterUrl = _matchResults[index].posterUrl;
-      File coverFile = File(p.join(parentDir, 'cover.jpg'));
+      // Create UserData/Cache folder for temporary cover files
+      final exePath = Platform.resolvedExecutable;
+      final appDir = p.dirname(exePath);
+      final cacheDir = Directory(p.join(appDir, 'UserData', 'Cache'));
+
+      // Create cache directory if it doesn't exist
+      if (!cacheDir.existsSync()) {
+        cacheDir.createSync(recursive: true);
+        debugPrint("📁 Created cache directory: ${cacheDir.path}");
+      }
+
+      // Use filename as unique identifier for the cover (avoid conflicts)
+      final fileName = p.basenameWithoutExtension(newName);
+      File coverFile = File(p.join(cacheDir.path, '${fileName}_cover.jpg'));
       bool coverCreated = false;
 
-      if (posterUrl != null && posterUrl.isNotEmpty) {
-        if (posterUrl.startsWith('http')) {
-          await CoreBackend.downloadCover(posterUrl, coverFile.path);
-          if (coverFile.existsSync()) coverCreated = true;
-        } else if (File(posterUrl).existsSync()) {
-          File(posterUrl).copySync(coverFile.path);
-          if (coverFile.existsSync()) coverCreated = true;
+      // Priority 1: Use coverBytes if already available (from search or existing metadata)
+      if (_matchResults[index].coverBytes != null) {
+        try {
+          coverFile.writeAsBytesSync(_matchResults[index].coverBytes!);
+          if (coverFile.existsSync()) {
+            coverCreated = true;
+            debugPrint("✅ Cover written from bytes: ${coverFile.path}");
+          }
+        } catch (e) {
+          debugPrint("⚠️  Failed to write cover from bytes: $e");
         }
       }
 
-      // Embed Metadata
+      // Priority 2: Download or copy from posterUrl if coverBytes not available
+      if (!coverCreated) {
+        String? posterUrl = _matchResults[index].posterUrl;
+        if (posterUrl != null && posterUrl.isNotEmpty) {
+          if (posterUrl.startsWith('http')) {
+            await CoreBackend.downloadCover(posterUrl, coverFile.path);
+            if (coverFile.existsSync()) {
+              coverCreated = true;
+              debugPrint("✅ Cover downloaded from URL: ${coverFile.path}");
+            }
+          } else if (File(posterUrl).existsSync()) {
+            File(posterUrl).copySync(coverFile.path);
+            if (coverFile.existsSync()) {
+              coverCreated = true;
+              debugPrint("✅ Cover copied from file: ${coverFile.path}");
+            }
+          }
+        }
+      }
+
+      // Embed Metadata with cover if available
       debugPrint("🎬 Embedding metadata for: $newName");
       await CoreBackend.embedMetadata(
         newFullPath,
@@ -434,7 +531,8 @@ class FileStateService with ChangeNotifier {
           final String filePath = _inputFiles[i].fullFilePath;
           debugPrint("  Extracting cover for: ${p.basename(filePath)}");
 
-          final coverBytes = await CoreBackend.extractCover(filePath, settings: settings);
+          final coverBytes =
+              await CoreBackend.extractCover(filePath, settings: settings);
 
           if (coverBytes != null) {
             // Update match result with cover bytes

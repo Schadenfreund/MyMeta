@@ -3,7 +3,7 @@ import 'dart:typed_data';
 class MatchResult {
   String newName; // Mutable to allow manual edits
   String? posterUrl; // Keep for online images
-  Uint8List? coverBytes; // NEW: In-memory cover art
+  Uint8List? coverBytes; // In-memory cover art
 
   // Basic Metadata
   String? title;
@@ -27,10 +27,16 @@ class MatchResult {
   String? imdbId;
   int? tmdbId;
 
+  // Alternative covers from the same search result
+  List<String>? alternativePosterUrls; // List of poster URLs from TMDB/OMDB
+
+  // Search results for re-matching
+  List<MatchResult>? searchResults; // List of alternative matches from last search
+
   MatchResult({
     required this.newName,
     this.posterUrl,
-    this.coverBytes, // NEW
+    this.coverBytes,
     this.title,
     this.year,
     this.season,
@@ -47,5 +53,7 @@ class MatchResult {
     this.runtime,
     this.imdbId,
     this.tmdbId,
+    this.alternativePosterUrls,
+    this.searchResults,
   });
 }

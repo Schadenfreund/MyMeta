@@ -20,6 +20,7 @@ dependencies:
   url_launcher: ^6.2.1
   http: ^1.2.0
   package_info_plus: ^8.0.0
+  path_provider: ^2.1.0
 
 dev_dependencies:
   flutter_test:
@@ -30,6 +31,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/MyMeta.png
+    - assets/MyMeta Symbol.png
   fonts:
     - family: Roboto
       fonts:

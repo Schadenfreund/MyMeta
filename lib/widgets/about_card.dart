@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
+import '../services/settings_service.dart';
 
-/// A minimal About card matching the reference design.
+/// A minimal About card matching the centralized design.
 /// Shows app icon, name, version, and a support link.
 class AboutCard extends StatelessWidget {
   const AboutCard({super.key});
@@ -27,96 +29,141 @@ class AboutCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardShadow =
-        isDark ? AppTheme.darkCardShadow : AppTheme.lightCardShadow;
-    final accentColor = Theme.of(context).colorScheme.primary;
+    final settings = context.watch<SettingsService>();
+    final accentColor = settings.accentColor;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(AppDimensions.cardBorderRadius),
-        border: Border.all(
-          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-          width: 1,
-        ),
-        boxShadow: cardShadow,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Row(
-          children: [
-            // App Icon
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: accentColor,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                Icons.movie_filter,
-                color: Colors.white,
-                size: 28,
-              ),
+    return FutureBuilder<PackageInfo>(
+      future: PackageInfo.fromPlatform(),
+      builder: (context, snapshot) {
+        final version = snapshot.data?.version ?? '1.6.1';
+
+        return Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(AppDimensions.cardBorderRadius),
+            border: Border.all(
+              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+              width: 1,
             ),
-            const SizedBox(width: AppSpacing.md),
-
-            // App Info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'MyMeta',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
+            boxShadow:
+                isDark ? AppTheme.darkCardShadow : AppTheme.lightCardShadow,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header with logo and version
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    // Accent-colored logo
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: ColorFiltered(
+                        colorFilter: ColorFilter.mode(
+                          accentColor,
+                          BlendMode.srcIn,
                         ),
-                  ),
-                  const SizedBox(height: 2),
-                  FutureBuilder<PackageInfo>(
-                    future: PackageInfo.fromPlatform(),
-                    builder: (context, snapshot) {
-                      final version = snapshot.data?.version ?? '1.0.0';
-                      return Text(
+                        child: Image.asset(
+                          'assets/MyMeta Symbol.png',
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Text(
+                      'MyMeta',
+                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                    const SizedBox(width: 12),
+                    Flexible(
+                      child: Text(
                         'Version $version',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: isDark
                                   ? AppColors.darkTextSecondary
                                   : AppColors.lightTextSecondary,
+                              fontSize: 13,
                             ),
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                Row(
+                  children: [
+                    // Message text
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Text(
+                            'Made with ',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: isDark
+                                      ? AppColors.darkTextPrimary
+                                      : AppColors.lightTextPrimary,
+                                ),
+                          ),
+                          Icon(
+                            Icons.favorite,
+                            size: 16,
+                            color: accentColor,
+                          ),
+                          Text(
+                            ' for you to enjoy. Please consider supporting the development.',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: isDark
+                                      ? AppColors.darkTextPrimary
+                                      : AppColors.lightTextPrimary,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
 
-            // Support Button
-            TextButton.icon(
-              onPressed: () => _openPayPal(context),
-              icon: Icon(
-                Icons.favorite,
-                size: 16,
-                color: Colors.red.shade400,
-              ),
-              label: Text(
-                'Support',
-                style: TextStyle(
-                  color: isDark
-                      ? AppColors.darkTextSecondary
-                      : AppColors.lightTextSecondary,
+                    // Support Button (accent color)
+                    ElevatedButton(
+                      onPressed: () => _openPayPal(context),
+                      child: const Text(
+                        'Support',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: accentColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        elevation: 2,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-              ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

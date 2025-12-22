@@ -4,7 +4,7 @@
 
 MyMeta is a powerful, user-friendly desktop application for automatically fetching, editing, and embedding metadata into your media files. Say goodbye to manual file organization and inconsistent naming!
 
-![Version](https://img.shields.io/badge/version-1.6.0-blue)
+![Version](https://img.shields.io/badge/version-1.6.1-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -36,13 +36,15 @@ MyMeta is a powerful, user-friendly desktop application for automatically fetchi
 - Dark & Light mode support
 - Inline metadata editing
 - Clean, professional interface
+- **Centralized card design system** for consistent UX
 
 ### **Power User Features**
+- **Easy tool setup** - Download FFmpeg and optional tools with one click
 - Undo rename operations
 - Folder exclusion lists
 - Format templates
 - Drag & drop support
-- No FFmpeg installation required (bundled!)
+- Portable - all tools stored in UserData folder
 
 ---
 
@@ -54,14 +56,20 @@ Download the latest release and extract to any folder.
 ### **2. Run MyMeta.exe**
 Double-click `MyMeta.exe` - no installation needed!
 
-### **3. Add Your API Keys**
-1. Click **Settings** tab
+### **3. Setup Tools (First Launch)**
+1. Open **Settings** tab
+2. Click **Setup Tools** button
+3. Download **FFmpeg** (required, ~80 MB)
+4. Optionally download **AtomicParsley** and **MKVToolNix** for faster processing
+
+### **4. Add Your API Keys**
+1. Still in **Settings** tab
 2. Get free API keys:
    - **TMDB:** [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
    - **OMDb:** [omdbapi.com/apikey.aspx](http://www.omdbapi.com/apikey.aspx)
 3. Paste keys in Settings
 
-### **4. Start Organizing**
+### **5. Start Organizing**
 1. Click **Add Files** or drag & drop media files
 2. Click **Match** to fetch metadata
 3. Review and edit as needed
@@ -72,8 +80,8 @@ Double-click `MyMeta.exe` - no installation needed!
 ## 📋 Requirements
 
 - **OS:** Windows 10/11 (64-bit)
-- **Disk Space:** ~100 MB
-- **Internet:** Required for metadata fetching
+- **Disk Space:** ~20 MB (app) + ~100 MB (FFmpeg - downloaded on first launch)
+- **Internet:** Required for metadata fetching and tool downloads
 - **API Keys:** Free TMDB and/or OMDb API key
 
 ---
@@ -106,6 +114,7 @@ Perfect for preparing files for Plex, Jellyfin, or Kodi with:
 
 - **[Quick Start Guide](QUICK_START.md)** - Step-by-step tutorial
 - **[Architecture](ARCHITECTURE.md)** - Technical deep-dive
+- **[Changelog](CHANGELOG.md)** - Version history & guidelines
 
 ---
 
@@ -154,7 +163,7 @@ Customize how files are named:
 ## ❓ FAQ
 
 ### **Do I need to install FFmpeg?**
-No! FFmpeg is bundled with MyMeta and works out of the box.
+No manual installation needed! MyMeta has a built-in Setup dialog that downloads and configures FFmpeg with one click. Just go to Settings → Setup Tools → Download.
 
 ### **Does it modifyoriginal files?**
 Yes, but safely:
@@ -182,9 +191,10 @@ Yes! All processing happens locally. Only metadata queries go to TMDB/OMDb APIs.
 - Try alternative provider (TMDB ↔ OMDb)
 
 ### **Cover art not embedding**
+- Ensure FFmpeg is downloaded (Settings → Setup Tools)
 - Ensure file format is MP4 or MKV
 - Check console output for errors
-- Verify FFmpeg is in build folder
+- Try re-downloading FFmpeg via Setup dialog
 
 ### **File not renamed**
 - Click "Match" before "Rename"
@@ -196,6 +206,9 @@ Yes! All processing happens locally. Only metadata queries go to TMDB/OMDb APIs.
 ## 📝 Changelog
 
 ### **Version 1.6.0** - Current
+- **One-click tool setup** - Download FFmpeg and optional tools with ease
+- Portable tool storage in UserData folder
+- No more bundled executables - smaller download size
 - Rebranded to MyMeta
 - Beautiful sidebar with soft glow
 - Comprehensive UX improvements

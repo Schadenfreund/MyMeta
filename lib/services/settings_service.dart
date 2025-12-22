@@ -8,7 +8,7 @@ class SettingsService with ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.dark;
   String _seriesFormat =
       "{series_name} - S{season_number}E{episode_number} - {episode_title}";
-  String _movieFormat = "{movie_name} ({year})";
+  String _movieFormat = "{movie_name}";
   List<String> _excludedFolders = [];
   bool _filenameAnalysisOnly = false;
   String _tmdbApiKey = "";
@@ -19,6 +19,20 @@ class SettingsService with ChangeNotifier {
   String _mkvpropeditPath = "";
   String _atomicparsleyPath = "";
 
+  // Configurable Download URLs
+  String _ffmpegUrl =
+      'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
+  String _mkvtoolnixUrl =
+      'https://mkvtoolnix.download/windows/releases/96.0/mkvtoolnix-64-bit-96.0.7z';
+  String _atomicParsleyUrl =
+      'https://github.com/wez/atomicparsley/releases/download/20240608.083822.1ed9031/AtomicParsleyWindows.zip';
+
+  // Tool Availability State
+  bool _isFFmpegAvailable = false;
+  bool _isMkvpropeditAvailable = false;
+  bool _isAtomicParsleyAvailable = false;
+  bool _isCheckingTools = false;
+
   ThemeMode get themeMode => _themeMode;
   String get seriesFormat => _seriesFormat;
   String get movieFormat => _movieFormat;
@@ -28,9 +42,18 @@ class SettingsService with ChangeNotifier {
   String get omdbApiKey => _omdbApiKey;
   String get metadataSource => _metadataSource;
   Color get accentColor => _accentColor;
-  String get ffmpegPath => _ffmpegPath; // Returns folder path
+  String get ffmpegPath => _ffmpegPath;
   String get mkvpropeditPath => _mkvpropeditPath;
   String get atomicparsleyPath => _atomicparsleyPath;
+
+  String get ffmpegUrl => _ffmpegUrl;
+  String get mkvtoolnixUrl => _mkvtoolnixUrl;
+  String get atomicParsleyUrl => _atomicParsleyUrl;
+
+  bool get isFFmpegAvailable => _isFFmpegAvailable;
+  bool get isMkvpropeditAvailable => _isMkvpropeditAvailable;
+  bool get isAtomicParsleyAvailable => _isAtomicParsleyAvailable;
+  bool get isCheckingTools => _isCheckingTools;
 
   /// Get the portable UserData folder path (next to executable)
   Future<String> _getUserDataPath() async {
@@ -59,6 +82,7 @@ class SettingsService with ChangeNotifier {
 
       if (!settingsFile.existsSync()) {
         debugPrint('Settings file not found, using defaults');
+        await checkToolAvailability();
         notifyListeners();
         return;
       }
@@ -100,6 +124,12 @@ class SettingsService with ChangeNotifier {
       _mkvpropeditPath = data['mkvpropedit_path'] ?? "";
       _atomicparsleyPath = data['atomicparsley_path'] ?? "";
 
+      // Download URLs
+      _ffmpegUrl = data['ffmpeg_url'] ?? _ffmpegUrl;
+      _mkvtoolnixUrl = data['mkvtoolnix_url'] ?? _mkvtoolnixUrl;
+      _atomicParsleyUrl = data['atomicparsley_url'] ?? _atomicParsleyUrl;
+
+      await checkToolAvailability();
       notifyListeners();
       debugPrint('✅ Settings loaded from UserData folder');
     } catch (e) {
@@ -125,6 +155,9 @@ class SettingsService with ChangeNotifier {
         'ffmpeg_path': _ffmpegPath,
         'mkvpropedit_path': _mkvpropeditPath,
         'atomicparsley_path': _atomicparsleyPath,
+        'ffmpeg_url': _ffmpegUrl,
+        'mkvtoolnix_url': _mkvtoolnixUrl,
+        'atomicparsley_url': _atomicParsleyUrl,
       };
 
       const jsonEncoder = JsonEncoder.withIndent('  ');
@@ -202,25 +235,47 @@ class SettingsService with ChangeNotifier {
   Future<void> setFFmpegPath(String path) async {
     _ffmpegPath = path;
     await _saveSettings();
+    await checkToolAvailability();
     notifyListeners();
   }
 
   Future<void> setMkvpropeditPath(String path) async {
     _mkvpropeditPath = path;
     await _saveSettings();
+    await checkToolAvailability();
     notifyListeners();
   }
 
   Future<void> setAtomicParsleyPath(String path) async {
     _atomicparsleyPath = path;
     await _saveSettings();
+    await checkToolAvailability();
+    notifyListeners();
+  }
+
+  Future<void> setFFmpegUrl(String url) async {
+    _ffmpegUrl = url;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> setMkvtoolnixUrl(String url) async {
+    _mkvtoolnixUrl = url;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> setAtomicParsleyUrl(String url) async {
+    _atomicParsleyUrl = url;
+    await _saveSettings();
     notifyListeners();
   }
 
   Future<void> resetSettings() async {
     _themeMode = ThemeMode.dark;
-    _seriesFormat = "{series_name} - S{season_number}E{episode_number} - {episode_title}";
-    _movieFormat = "{movie_name} ({year})";
+    _seriesFormat =
+        "{series_name} - S{season_number}E{episode_number} - {episode_title}";
+    _movieFormat = "{movie_name}";
     _excludedFolders = [];
     _filenameAnalysisOnly = false;
     _tmdbApiKey = "";
@@ -230,8 +285,183 @@ class SettingsService with ChangeNotifier {
     _ffmpegPath = "";
     _mkvpropeditPath = "";
     _atomicparsleyPath = "";
+    _ffmpegUrl =
+        'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
+    _mkvtoolnixUrl =
+        'https://mkvtoolnix.download/windows/releases/96.0/mkvtoolnix-64-bit-96.0.7z';
+    _atomicParsleyUrl =
+        'https://github.com/wez/atomicparsley/releases/download/20240608.083822.1ed9031/AtomicParsleyWindows.zip';
 
     await _saveSettings();
+    await checkToolAvailability();
     notifyListeners();
+  }
+
+  /// Check availability of all tools
+  Future<void> checkToolAvailability() async {
+    if (_isCheckingTools) return;
+
+    _isCheckingTools = true;
+    notifyListeners();
+
+    _isFFmpegAvailable = await _isToolAvailable('ffmpeg');
+    _isMkvpropeditAvailable = await _isToolAvailable('mkvpropedit');
+    _isAtomicParsleyAvailable = await _isToolAvailable('AtomicParsley');
+
+    // Auto-fix logic: if tool is unavailable but found in default 'tools' dir, update path automatically
+    if (!_isFFmpegAvailable) await _tryAutoFixPath('ffmpeg');
+    if (!_isMkvpropeditAvailable) await _tryAutoFixPath('mkvpropedit');
+    if (!_isAtomicParsleyAvailable) await _tryAutoFixPath('AtomicParsley');
+
+    _isCheckingTools = false;
+    notifyListeners();
+  }
+
+  Future<void> _tryAutoFixPath(String toolName) async {
+    try {
+      final userDataPath = await _getUserDataPath();
+      final toolsDir = p.join(userDataPath, 'tools');
+
+      String subDir = '';
+      if (toolName == 'ffmpeg')
+        subDir = 'ffmpeg';
+      else if (toolName == 'mkvpropedit')
+        subDir = 'mkvtoolnix';
+      else if (toolName == 'AtomicParsley') subDir = 'atomicparsley';
+
+      final subDirPath = p.join(toolsDir, subDir);
+      final subDirectory = Directory(subDirPath);
+
+      if (!subDirectory.existsSync()) return;
+
+      // Find the executable
+      String? foundPath;
+
+      // 1. Direct
+      if (File(p.join(subDirPath, '$toolName.exe')).existsSync()) {
+        foundPath = subDirPath;
+      }
+      // 2. Bin
+      else if (File(p.join(subDirPath, 'bin', '$toolName.exe')).existsSync()) {
+        foundPath = p.join(subDirPath, 'bin');
+      }
+      // 3. Recursive
+      else {
+        try {
+          final entities = subDirectory.listSync(recursive: true);
+          for (var entity in entities) {
+            if (entity is File &&
+                p.basename(entity.path).toLowerCase() ==
+                    '$toolName.exe'.toLowerCase()) {
+              foundPath = p.dirname(entity.path);
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (foundPath != null) {
+        debugPrint('✅ Auto-fixed path for $toolName: $foundPath');
+        if (toolName == 'ffmpeg') {
+          _ffmpegPath = foundPath;
+          _isFFmpegAvailable = true;
+        } else if (toolName == 'mkvpropedit') {
+          _mkvpropeditPath = foundPath;
+          _isMkvpropeditAvailable = true;
+        } else if (toolName == 'AtomicParsley') {
+          _atomicparsleyPath = foundPath;
+          _isAtomicParsleyAvailable = true;
+        }
+        await _saveSettings();
+      }
+    } catch (e) {
+      debugPrint('Auto-fix failed for $toolName: $e');
+    }
+  }
+
+  /// Internal check for a single tool
+  Future<bool> _isToolAvailable(String toolName) async {
+    String? customPath;
+
+    // Get custom path based on tool name
+    if (toolName == 'ffmpeg') {
+      customPath = _ffmpegPath;
+    } else if (toolName == 'mkvpropedit') {
+      customPath = _mkvpropeditPath;
+    } else if (toolName == 'AtomicParsley') {
+      customPath = _atomicparsleyPath;
+    }
+
+    // Try custom path from settings (if configured)
+    if (customPath != null && customPath.isNotEmpty) {
+      final dir = Directory(customPath);
+      if (dir.existsSync()) {
+        // 1. Try finding the tool directly in the configured folder
+        final directPath = p.join(customPath, '$toolName.exe');
+        if (File(directPath).existsSync()) {
+          return true;
+        }
+
+        // 2. Try finding it in a 'bin' subdirectory
+        final binPath = p.join(customPath, 'bin', '$toolName.exe');
+        if (File(binPath).existsSync()) {
+          return true;
+        }
+
+        // 3. Recursive search (Robust fallback)
+        try {
+          final entities = dir.listSync(recursive: true, followLinks: false);
+          for (final entity in entities) {
+            if (entity is File) {
+              if (p.basename(entity.path).toLowerCase() ==
+                  '$toolName.exe'.toLowerCase()) {
+                return true;
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    // 4. Try bundled in app directory (portable mode - UserData/tools)
+    // This is essentially redundant with AutoFix but meant for detection of implicitly available tools
+    // But since we want to populate the path field, AutoFix is better.
+    // We leave this here just to return 'true' if the path IS empty but tool is present (e.g. fresh install)
+
+    try {
+      final userDataPath = await _getUserDataPath();
+      final toolsDir = p.join(userDataPath, 'tools');
+
+      // Standard subdirs
+      String subDir = '';
+      if (toolName == 'ffmpeg')
+        subDir = 'ffmpeg';
+      else if (toolName == 'mkvpropedit')
+        subDir = 'mkvtoolnix';
+      else if (toolName == 'AtomicParsley') subDir = 'atomicparsley';
+
+      final subDirPath = p.join(toolsDir, subDir);
+      final subDirectory = Directory(subDirPath);
+
+      if (subDirectory.existsSync()) {
+        if (File(p.join(subDirPath, '$toolName.exe')).existsSync()) return true;
+
+        if (File(p.join(subDirPath, 'bin', '$toolName.exe')).existsSync())
+          return true;
+
+        try {
+          final entities = subDirectory.listSync(recursive: true);
+          for (var entity in entities) {
+            if (entity is File &&
+                p.basename(entity.path).toLowerCase() ==
+                    '$toolName.exe'.toLowerCase()) {
+              return true;
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    return false;
   }
 }

@@ -103,6 +103,50 @@ class CoreBackend {
                 }
               }
 
+              // Fetch alternative posters for this TV show
+              List<String>? alternativePosters;
+              if (tvId != null) {
+                try {
+                  alternativePosters = await tmdb.getTVPosters(tvId);
+                } catch (e) {
+                  print("Error fetching alternative posters: $e");
+                }
+              }
+
+              // Fetch all search results for re-matching
+              List<MatchResult>? searchResults;
+              try {
+                var allResults = await tmdb.searchTVAll(record.title!);
+                searchResults = [];
+                for (var result in allResults) {
+                  String? rSeriesName = result['name'];
+                  int? rYear;
+                  String? date = result['first_air_date'];
+                  if (date != null && date.length >= 4) {
+                    rYear = int.tryParse(date.substring(0, 4));
+                  }
+                  String? rPosterUrl;
+                  if (result['poster_path'] != null) {
+                    rPosterUrl =
+                        "https://image.tmdb.org/t/p/w500${result['poster_path']}";
+                  }
+                  double? rRating = result['vote_average']?.toDouble();
+                  int? rTmdbId = result['id'];
+
+                  searchResults.add(MatchResult(
+                    newName: rSeriesName ?? "Unknown",
+                    posterUrl: rPosterUrl,
+                    title: rSeriesName,
+                    year: rYear,
+                    type: 'episode',
+                    rating: rRating,
+                    tmdbId: rTmdbId,
+                  ));
+                }
+              } catch (e) {
+                print("Error fetching search results: $e");
+              }
+
               var context = {
                 "series_name": seriesName,
                 "year": year,
@@ -126,7 +170,9 @@ class CoreBackend {
                   actors: actors,
                   rating: rating,
                   contentRating: contentRating,
-                  tmdbId: tmdbId));
+                  tmdbId: tmdbId,
+                  alternativePosterUrls: alternativePosters,
+                  searchResults: searchResults));
               continue; // Skip to next record
             }
           } catch (e) {
@@ -182,6 +228,41 @@ class CoreBackend {
                 }
               }
 
+              // Fetch all search results for re-matching
+              List<MatchResult>? searchResults;
+              try {
+                var allResults = await omdb.searchSeriesAll(record.title!);
+                searchResults = [];
+                for (var result in allResults) {
+                  String? rSeriesName = result['Title'];
+                  int? rYear;
+                  String? date = result['Year'];
+                  if (date != null && date.length >= 4) {
+                    var yearMatch = RegExp(r'\d{4}').firstMatch(date);
+                    if (yearMatch != null)
+                      rYear = int.parse(yearMatch.group(0)!);
+                  }
+                  String? rPosterUrl;
+                  if (result['Poster'] != null && result['Poster'] != 'N/A') {
+                    rPosterUrl = result['Poster'];
+                  }
+                  double? rRating = OmdbService.extractRating(result);
+                  String? rImdbId = result['imdbID'];
+
+                  searchResults.add(MatchResult(
+                    newName: rSeriesName ?? "Unknown",
+                    posterUrl: rPosterUrl,
+                    title: rSeriesName,
+                    year: rYear,
+                    type: 'episode',
+                    rating: rRating,
+                    imdbId: rImdbId,
+                  ));
+                }
+              } catch (e) {
+                print("Error fetching search results: $e");
+              }
+
               var context = {
                 "series_name": seriesName,
                 "year": year,
@@ -205,7 +286,8 @@ class CoreBackend {
                   actors: actors,
                   rating: rating,
                   contentRating: contentRating,
-                  imdbId: imdbId));
+                  imdbId: imdbId,
+                  searchResults: searchResults));
               continue; // Skip to next record
             }
           } catch (e) {
@@ -279,6 +361,51 @@ class CoreBackend {
                 }
               }
 
+              // Fetch alternative posters for this movie
+              List<String>? alternativePosters;
+              if (movieId != null) {
+                try {
+                  alternativePosters = await tmdb.getMoviePosters(movieId);
+                } catch (e) {
+                  print("Error fetching alternative posters: $e");
+                }
+              }
+
+              // Fetch all search results for re-matching
+              List<MatchResult>? searchResults;
+              try {
+                var allResults =
+                    await tmdb.searchMovieAll(record.title!, record.year);
+                searchResults = [];
+                for (var result in allResults) {
+                  String? rMovieName = result['title'];
+                  int? rYear;
+                  String? date = result['release_date'];
+                  if (date != null && date.length >= 4) {
+                    rYear = int.tryParse(date.substring(0, 4));
+                  }
+                  String? rPosterUrl;
+                  if (result['poster_path'] != null) {
+                    rPosterUrl =
+                        "https://image.tmdb.org/t/p/w500${result['poster_path']}";
+                  }
+                  double? rRating = result['vote_average']?.toDouble();
+                  int? rTmdbId = result['id'];
+
+                  searchResults.add(MatchResult(
+                    newName: rMovieName ?? "Unknown",
+                    posterUrl: rPosterUrl,
+                    title: rMovieName,
+                    year: rYear,
+                    type: 'movie',
+                    rating: rRating,
+                    tmdbId: rTmdbId,
+                  ));
+                }
+              } catch (e) {
+                print("Error fetching search results: $e");
+              }
+
               var context = {"movie_name": movieName, "year": year};
               results.add(MatchResult(
                   newName:
@@ -294,7 +421,9 @@ class CoreBackend {
                   rating: rating,
                   contentRating: contentRating,
                   runtime: runtime,
-                  tmdbId: tmdbId));
+                  tmdbId: tmdbId,
+                  alternativePosterUrls: alternativePosters,
+                  searchResults: searchResults));
               continue; // Skip to next record
             }
           } catch (e) {
@@ -340,6 +469,42 @@ class CoreBackend {
                 }
               }
 
+              // Fetch all search results for re-matching
+              List<MatchResult>? searchResults;
+              try {
+                var allResults =
+                    await omdb.searchMovieAll(record.title!, record.year);
+                searchResults = [];
+                for (var result in allResults) {
+                  String? rMovieName = result['Title'];
+                  int? rYear;
+                  String? date = result['Year'];
+                  if (date != null && date.length >= 4) {
+                    var yearMatch = RegExp(r'\d{4}').firstMatch(date);
+                    if (yearMatch != null)
+                      rYear = int.parse(yearMatch.group(0)!);
+                  }
+                  String? rPosterUrl;
+                  if (result['Poster'] != null && result['Poster'] != 'N/A') {
+                    rPosterUrl = result['Poster'];
+                  }
+                  double? rRating = OmdbService.extractRating(result);
+                  String? rImdbId = result['imdbID'];
+
+                  searchResults.add(MatchResult(
+                    newName: rMovieName ?? "Unknown",
+                    posterUrl: rPosterUrl,
+                    title: rMovieName,
+                    year: rYear,
+                    type: 'movie',
+                    rating: rRating,
+                    imdbId: rImdbId,
+                  ));
+                }
+              } catch (e) {
+                print("Error fetching search results: $e");
+              }
+
               var context = {"movie_name": movieName, "year": year};
               results.add(MatchResult(
                   newName:
@@ -355,7 +520,8 @@ class CoreBackend {
                   rating: rating,
                   contentRating: contentRating,
                   runtime: runtime,
-                  imdbId: imdbId));
+                  imdbId: imdbId,
+                  searchResults: searchResults));
               continue; // Skip to next record
             }
           } catch (e) {
@@ -467,12 +633,38 @@ class CoreBackend {
     }
   }
 
-  /// Generic tool path resolver - checks custom path and bundled only
+  /// Generic tool path resolver - checks UserData → custom → bundled
   /// Returns null if tool not found (we skip PATH check to avoid hangs)
   static Future<String?> _resolveToolPath(
     String toolName,
     String? customPath,
   ) async {
+    // 0. Try UserData/tools folder first
+    try {
+      final exePath = Platform.resolvedExecutable;
+      final exeDir = p.dirname(exePath);
+      final toolNameLower = toolName.toLowerCase();
+      String userDataSubDir;
+
+      // Map tool names to their UserData subdirectory names
+      if (toolNameLower == 'mkvpropedit') {
+        userDataSubDir = 'mkvtoolnix';
+      } else if (toolNameLower == 'atomicparsley') {
+        userDataSubDir = 'atomicparsley';
+      } else {
+        userDataSubDir = toolNameLower;
+      }
+
+      final userDataTool =
+          p.join(exeDir, 'UserData', 'tools', userDataSubDir, '$toolName.exe');
+      if (File(userDataTool).existsSync()) {
+        print('✅ Using UserData $toolName: $userDataTool');
+        return userDataTool;
+      }
+    } catch (e) {
+      // Continue to custom path check
+    }
+
     // 1. Try custom path from settings
     if (customPath != null && customPath.isNotEmpty) {
       // Try bin/ subdirectory first (like FFmpeg structure)
@@ -490,7 +682,7 @@ class CoreBackend {
       }
     }
 
-    // 2. Try bundled tool in app directory
+    // 2. Try bundled tool in app directory (deprecated - will be removed)
     try {
       final exePath = Platform.resolvedExecutable;
       final exeDir = p.dirname(exePath);
@@ -509,12 +701,14 @@ class CoreBackend {
   }
 
   /// Resolve mkvpropedit path (custom → bundled → PATH)
-  static Future<String?> _resolveMkvpropedit({SettingsService? settings}) async {
+  static Future<String?> _resolveMkvpropedit(
+      {SettingsService? settings}) async {
     return _resolveToolPath('mkvpropedit', settings?.mkvpropeditPath);
   }
 
   /// Resolve AtomicParsley path (custom → bundled → PATH)
-  static Future<String?> _resolveAtomicParsley({SettingsService? settings}) async {
+  static Future<String?> _resolveAtomicParsley(
+      {SettingsService? settings}) async {
     return _resolveToolPath('AtomicParsley', settings?.atomicparsleyPath);
   }
 
@@ -592,7 +786,8 @@ class CoreBackend {
     // 3. If still not found, just try "ffprobe" (assume it's in PATH)
     if (ffprobePath == null) {
       ffprobePath = 'ffprobe';
-      print('⚠️  FFprobe not found in custom/bundled paths, trying system PATH...');
+      print(
+          '⚠️  FFprobe not found in custom/bundled paths, trying system PATH...');
     }
 
     // Run FFprobe to get metadata
@@ -747,7 +942,8 @@ class CoreBackend {
         newName = createFormattedTitle(formatTemplate, context) + ext;
       } else {
         // Movie format - use user's movie format template
-        final String formatTemplate = settings?.movieFormat ?? "{movie_name} ({year})";
+        final String formatTemplate =
+            settings?.movieFormat ?? "{movie_name} ({year})";
 
         Map<String, dynamic> context = {
           'movie_name': title ?? 'Unknown Movie',
@@ -936,65 +1132,129 @@ class CoreBackend {
     return null;
   }
 
-  /// Embed metadata into MKV file using mkvpropedit (instant in-place editing)
+  /// Embed metadata into MKV file using mkvpropedit with XML tags (fast in-place)
   static Future<bool> _embedMetadataMkv(
-    String filePath,
-    String? coverPath,
-    MatchResult metadata,
-    {SettingsService? settings}
-  ) async {
+      String filePath, String? coverPath, MatchResult metadata,
+      {SettingsService? settings}) async {
     String? toolPath = await _resolveMkvpropedit(settings: settings);
     if (toolPath == null) {
-      print('⚠️  mkvpropedit not available');
+      print('mkvpropedit not available');
+      return false;
+    }
+    if (!File(filePath).existsSync()) {
+      print('MKV file not found');
       return false;
     }
 
-    List<String> args = [filePath, '--edit', 'info'];
-
-    // Add metadata fields to MKV info section
-    if (metadata.title != null && metadata.title!.isNotEmpty) {
-      args.addAll(['--set', 'title=${metadata.title}']);
-    }
-
-    // Note: mkvpropedit has limited metadata support in info section
-    // For comprehensive metadata, we'd need to create XML tags
-    // For now, we'll just set the title which is the most important field
-
-    // Add cover art attachment
-    if (coverPath != null && File(coverPath).existsSync()) {
-      args.addAll([
-        '--add-attachment', coverPath,
-        '--attachment-name', 'cover.jpg',
-        '--attachment-mime-type', 'image/jpeg'
-      ]);
-    }
-
     try {
-      var result = await Process.run(toolPath, args, runInShell: true);
+      bool hasAttachment = false;
+      bool hasTags = false;
 
-      if (result.exitCode == 0) {
-        print('✅ MKV metadata embedded instantly with mkvpropedit');
-        return true;
-      } else {
-        print('❌ mkvpropedit failed (exit ${result.exitCode})');
-        if (result.stderr.toString().isNotEmpty) {
-          print('Error: ${result.stderr}');
+      // Step 1: Attach cover
+      if (coverPath != null && File(coverPath).existsSync()) {
+        var result = await Process.run(
+            toolPath,
+            [
+              filePath,
+              '--attachment-name',
+              'cover.jpg',
+              '--attachment-mime-type',
+              'image/jpeg',
+              '--add-attachment',
+              coverPath
+            ],
+            runInShell: false);
+        if (result.exitCode == 0) {
+          print('Cover attached');
+          hasAttachment = true;
+        } else {
+          print('Cover failed: ${result.stderr}');
         }
-        return false;
       }
+
+      // Step 2: XML tags (writes to Tags element where FFprobe reads!)
+      StringBuffer xml = StringBuffer();
+      xml.writeln('<?xml version="1.0" encoding="UTF-8"?>');
+      xml.writeln('<Tags><Tag><Targets></Targets>');
+      int tagCount = 0;
+
+      void addTag(String name, String? value) {
+        if (value != null && value.isNotEmpty) {
+          String escaped = value
+              .replaceAll('&', '&amp;')
+              .replaceAll('<', '&lt;')
+              .replaceAll('>', '&gt;');
+          xml.writeln(
+              '<Simple><Name>$name</Name><String>$escaped</String></Simple>');
+          tagCount++;
+        }
+      }
+
+      // DEBUG: Show what values we're writing
+      print('📝 VALUES BEING WRITTEN:');
+      print('   Title: "${metadata.title}"');
+      print('   Year: ${metadata.year}');
+      print(
+          '   Description: "${metadata.description?.substring(0, (metadata.description?.length ?? 0) > 50 ? 50 : metadata.description?.length ?? 0)}..."');
+
+      addTag('TITLE', metadata.title);
+      if (metadata.year != null)
+        addTag('DATE_RELEASED', metadata.year.toString());
+      addTag('DESCRIPTION', metadata.description);
+      addTag('SYNOPSIS', metadata.description);
+      if (metadata.genres != null && metadata.genres!.isNotEmpty)
+        addTag('GENRE', metadata.genres!.join(', '));
+      addTag('DIRECTOR', metadata.director);
+      if (metadata.actors != null && metadata.actors!.isNotEmpty)
+        addTag('ACTOR', metadata.actors!.join(', '));
+      addTag('LAW_RATING', metadata.contentRating);
+      if (metadata.season != null && metadata.episode != null) {
+        addTag('CONTENT_TYPE', 'TV Show');
+        addTag('SEASON/PART_NUMBER', metadata.season.toString());
+        addTag('EPISODE/PART_NUMBER', metadata.episode.toString());
+        addTag('EPISODE/TITLE', metadata.episodeTitle);
+      } else {
+        addTag('CONTENT_TYPE', 'Movie');
+      }
+      xml.writeln('</Tag></Tags>');
+
+      if (tagCount > 0) {
+        final exeDir = p.dirname(Platform.resolvedExecutable);
+        final cacheDir = p.join(exeDir, 'UserData', 'Cache');
+        await Directory(cacheDir).create(recursive: true);
+        String xmlPath = p.join(
+            cacheDir, 'tags_${DateTime.now().millisecondsSinceEpoch}.xml');
+        await File(xmlPath).writeAsString(xml.toString());
+        print('Writing $tagCount tags (in-place)...');
+        var result = await Process.run(
+            toolPath, [filePath, '--tags', 'all:$xmlPath'],
+            runInShell: false);
+        try {
+          await File(xmlPath).delete();
+        } catch (e) {}
+        if (result.exitCode == 0) {
+          print('$tagCount tags written');
+          hasTags = true;
+        } else {
+          print('Tags failed: ${result.stderr}');
+        }
+      }
+
+      if (hasAttachment || hasTags) {
+        print('MKV complete (fast in-place)');
+        return true;
+      }
+      return true;
     } catch (e) {
-      print('❌ Error running mkvpropedit: $e');
+      print('Error: $e');
       return false;
     }
   }
 
   /// Embed metadata into MP4 file using AtomicParsley (fast single-pass editing)
   static Future<bool> _embedMetadataMp4(
-    String filePath,
-    String? coverPath,
-    MatchResult metadata,
-    {SettingsService? settings}
-  ) async {
+      String filePath, String? coverPath, MatchResult metadata,
+      {SettingsService? settings}) async {
     String? toolPath = await _resolveAtomicParsley(settings: settings);
     if (toolPath == null) {
       print('⚠️  AtomicParsley not available');
@@ -1043,17 +1303,68 @@ class CoreBackend {
     // Overwrite in place
     args.add('--overWrite');
 
+    // DEBUG: Log exact command and arguments
+    print('🔧 ATOMICPARSLEY COMMAND:');
+    print('   Tool: $toolPath');
+    print('   File: $filePath');
+    print('   Args: ${args.join(' | ')}');
+    print('   Full: "$toolPath" ${args.map((a) => '"$a"').join(' ')}');
+
+    // Check file before
+    File targetFile = File(filePath);
+    DateTime beforeTime = targetFile.lastModifiedSync();
+    int beforeSize = targetFile.lengthSync();
+    print(
+        '📊 BEFORE: Modified=${beforeTime.toIso8601String()}, Size=$beforeSize');
+
     try {
-      var result = await Process.run(toolPath, args, runInShell: true);
+      // Use runInShell: false to avoid path quoting issues with spaces
+      var result = await Process.run(toolPath, args, runInShell: false);
+
+      print('📤 Exit Code: ${result.exitCode}');
+
+      // ALWAYS log stdout and stderr
+      String stdout = result.stdout.toString().trim();
+      String stderr = result.stderr.toString().trim();
+
+      if (stdout.isNotEmpty) {
+        print('📄 STDOUT:');
+        print(stdout);
+      }
+
+      if (stderr.isNotEmpty) {
+        print('⚠️  STDERR:');
+        print(stderr);
+      }
+
+      // Wait for file system to sync
+      await Future.delayed(Duration(milliseconds: 500));
+
+      // Check file after
+      if (targetFile.existsSync()) {
+        DateTime afterTime = targetFile.lastModifiedSync();
+        int afterSize = targetFile.lengthSync();
+        print(
+            '📊 AFTER: Modified=${afterTime.toIso8601String()}, Size=$afterSize');
+
+        bool timeChanged = afterTime.isAfter(beforeTime);
+        bool sizeChanged = afterSize != beforeSize;
+
+        print('   Time changed: $timeChanged');
+        print('   Size changed: $sizeChanged');
+
+        if (!timeChanged && !sizeChanged) {
+          print('❌ FILE NOT MODIFIED - AtomicParsley did NOT write metadata!');
+          print('   This means the command failed silently');
+          return false;
+        }
+      }
 
       if (result.exitCode == 0) {
-        print('✅ MP4 metadata embedded fast with AtomicParsley');
+        print('✅ MP4 metadata embedded with AtomicParsley');
         return true;
       } else {
         print('❌ AtomicParsley failed (exit ${result.exitCode})');
-        if (result.stderr.toString().isNotEmpty) {
-          print('Error: ${result.stderr}');
-        }
         return false;
       }
     } catch (e) {
@@ -1094,17 +1405,20 @@ class CoreBackend {
 
     // Try format-specific tool first for maximum speed
     if (ext == '.mkv') {
-      print("🔧 Attempting mkvpropedit (instant in-place editing)...");
-      success = await _embedMetadataMkv(filePath, coverPath, metadata, settings: settings);
+      print("🔧 Using mkvpropedit with XML tags (fast in-place)...");
+      success = await _embedMetadataMkv(filePath, coverPath, metadata,
+          settings: settings);
     } else if (ext == '.mp4') {
       print("🔧 Attempting AtomicParsley (fast single-pass)...");
-      success = await _embedMetadataMp4(filePath, coverPath, metadata, settings: settings);
+      success = await _embedMetadataMp4(filePath, coverPath, metadata,
+          settings: settings);
     }
 
     // Fall back to FFmpeg if specialized tool failed or unavailable
     if (!success) {
       print("⚠️  Falling back to FFmpeg (slower but reliable)...");
-      await _embedMetadataFFmpeg(filePath, coverPath, metadata, settings: settings);
+      await _embedMetadataFFmpeg(filePath, coverPath, metadata,
+          settings: settings);
     }
 
     print("=" * 60 + "\n");
@@ -1229,8 +1543,9 @@ class CoreBackend {
 
     // === EXECUTE ===
     try {
+      // Use runInShell: false to avoid path quoting issues with spaces
       var result =
-          await Process.run(_ffmpegPath ?? 'ffmpeg', args, runInShell: true);
+          await Process.run(_ffmpegPath ?? 'ffmpeg', args, runInShell: false);
 
       if (result.exitCode == 0) {
         // Verify temp file

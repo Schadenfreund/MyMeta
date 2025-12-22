@@ -6,6 +6,10 @@ import '../backend/core_backend.dart';
 import '../services/settings_service.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_drop/desktop_drop.dart';
+import 'cover_picker_modal.dart';
+import 'package:http/http.dart' as http;
+import 'dart:typed_data';
+import 'dart:io';
 
 class InlineMetadataEditor extends StatefulWidget {
   final String originalName;
@@ -46,6 +50,7 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
 
   String _type = 'movie';
   bool _isProcessing = false; // Prevents double-clicking
+  Uint8List? _updatedCoverBytes; // Stores new cover when user changes it
 
   @override
   void initState() {
@@ -75,6 +80,36 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
         TextEditingController(text: res.runtime?.toString() ?? "");
 
     _type = res.type ?? 'movie';
+  }
+
+  @override
+  void didUpdateWidget(InlineMetadataEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialResult != oldWidget.initialResult) {
+      final res = widget.initialResult;
+      // Update all controllers with new values
+      _nameController.text = res.newName;
+      _posterUrlController.text = res.posterUrl ?? "";
+      _titleController.text = res.title ?? "";
+      _yearController.text = res.year?.toString() ?? "";
+      _seasonController.text = res.season?.toString() ?? "";
+      _episodeController.text = res.episode?.toString() ?? "";
+      _episodeTitleController.text = res.episodeTitle ?? "";
+      _descriptionController.text = res.description ?? "";
+      _genresController.text = res.genres?.join(', ') ?? "";
+      _directorController.text = res.director ?? "";
+      _actorsController.text = res.actors?.join(', ') ?? "";
+      _ratingController.text = res.rating?.toString() ?? "";
+      _contentRatingController.text = res.contentRating ?? "";
+      _runtimeController.text = res.runtime?.toString() ?? "";
+
+      // Also update internal state if needed
+      if ((res.type == 'movie' || res.type == 'episode') && res.type != _type) {
+        setState(() {
+          _type = res.type!;
+        });
+      }
+    }
   }
 
   @override
@@ -201,6 +236,15 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
     });
   }
 
+  bool _isMetadataSuccessful() {
+    // Check if online metadata search was successful by looking for key fields
+    return widget.initialResult.title != null &&
+        (widget.initialResult.title!.isNotEmpty) &&
+        (widget.initialResult.year != null ||
+            widget.initialResult.genres != null ||
+            widget.initialResult.posterUrl != null);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -285,9 +329,11 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(8),
-                              child: widget.initialResult.coverBytes != null
+                              child: (_updatedCoverBytes != null ||
+                                      widget.initialResult.coverBytes != null)
                                   ? Image.memory(
-                                      widget.initialResult.coverBytes!,
+                                      _updatedCoverBytes ??
+                                          widget.initialResult.coverBytes!,
                                       fit: BoxFit.cover,
                                       width: double.infinity,
                                       height: double.infinity,
@@ -336,33 +382,204 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 40),
-                      ),
-                      onPressed: () async {
-                        var res = await FilePicker.platform
-                            .pickFiles(type: FileType.image);
-                        if (res != null) {
-                          setState(() {
-                            _posterUrlController.text = res.files.single.path!;
-                          });
-                        }
-                      },
-                      icon: const Icon(Icons.upload_file, size: 18),
-                      label: const Text("Select Image"),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _posterUrlController,
-                      decoration: const InputDecoration(
-                        hintText: "Or paste URL...",
-                        isDense: true,
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      ),
-                      style: const TextStyle(fontSize: 12),
-                      onChanged: (_) => setState(() {}),
+                    Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'Select Image',
+                          icon: const Icon(Icons.upload_file),
+                          onPressed: () async {
+                            var res = await FilePicker.platform
+                                .pickFiles(type: FileType.image);
+                            if (res != null && res.files.single.path != null) {
+                              final path = res.files.single.path!;
+                              setState(() {
+                                _posterUrlController.text = path;
+                              });
+
+                              // Load file bytes for local file
+                              try {
+                                final file = File(path);
+                                if (file.existsSync()) {
+                                  final bytes = await file.readAsBytes();
+                                  setState(() {
+                                    _updatedCoverBytes = bytes;
+                                  });
+                                  debugPrint(
+                                      "✅ Local cover loaded (${bytes.length} bytes)");
+
+                                  // Update the MatchResult immediately so thumbnail updates
+                                  final updatedResult = MatchResult(
+                                    newName: widget.initialResult.newName,
+                                    posterUrl: path,
+                                    coverBytes: bytes,
+                                    title: widget.initialResult.title,
+                                    year: widget.initialResult.year,
+                                    season: widget.initialResult.season,
+                                    episode: widget.initialResult.episode,
+                                    episodeTitle:
+                                        widget.initialResult.episodeTitle,
+                                    type: widget.initialResult.type,
+                                    description:
+                                        widget.initialResult.description,
+                                    genres: widget.initialResult.genres,
+                                    director: widget.initialResult.director,
+                                    actors: widget.initialResult.actors,
+                                    rating: widget.initialResult.rating,
+                                    contentRating:
+                                        widget.initialResult.contentRating,
+                                    studio: widget.initialResult.studio,
+                                    runtime: widget.initialResult.runtime,
+                                    imdbId: widget.initialResult.imdbId,
+                                    tmdbId: widget.initialResult.tmdbId,
+                                    alternativePosterUrls: widget
+                                        .initialResult.alternativePosterUrls,
+                                    searchResults:
+                                        widget.initialResult.searchResults,
+                                  );
+                                  widget.onSave(updatedResult);
+                                }
+                              } catch (e) {
+                                debugPrint(
+                                    "⚠️  Failed to load local cover: $e");
+                              }
+                            }
+                          },
+                        ),
+                        if (widget.initialResult.alternativePosterUrls !=
+                                null &&
+                            widget.initialResult.alternativePosterUrls!
+                                .isNotEmpty)
+                          IconButton(
+                            tooltip: 'Choose Cover',
+                            icon: const Icon(Icons.image_search),
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) => CoverPickerModal(
+                                  posterUrls: widget
+                                      .initialResult.alternativePosterUrls!,
+                                  currentPosterUrl: _posterUrlController.text,
+                                  onSelected: (url) async {
+                                    // Download new cover immediately
+                                    setState(() {
+                                      _posterUrlController.text = url;
+                                      _updatedCoverBytes =
+                                          null; // Clear old bytes
+                                    });
+
+                                    if (url.startsWith('http')) {
+                                      try {
+                                        final response =
+                                            await http.get(Uri.parse(url));
+                                        if (response.statusCode == 200 &&
+                                            mounted) {
+                                          setState(() {
+                                            _updatedCoverBytes =
+                                                response.bodyBytes;
+                                          });
+                                          debugPrint(
+                                              "✅ New cover downloaded (${response.bodyBytes.length} bytes)");
+
+                                          // Update the MatchResult immediately so thumbnail updates
+                                          final updatedResult = MatchResult(
+                                            newName:
+                                                widget.initialResult.newName,
+                                            posterUrl: url,
+                                            coverBytes: response.bodyBytes,
+                                            title: widget.initialResult.title,
+                                            year: widget.initialResult.year,
+                                            season: widget.initialResult.season,
+                                            episode:
+                                                widget.initialResult.episode,
+                                            episodeTitle: widget
+                                                .initialResult.episodeTitle,
+                                            type: widget.initialResult.type,
+                                            description: widget
+                                                .initialResult.description,
+                                            genres: widget.initialResult.genres,
+                                            director:
+                                                widget.initialResult.director,
+                                            actors: widget.initialResult.actors,
+                                            rating: widget.initialResult.rating,
+                                            contentRating: widget
+                                                .initialResult.contentRating,
+                                            studio: widget.initialResult.studio,
+                                            runtime:
+                                                widget.initialResult.runtime,
+                                            imdbId: widget.initialResult.imdbId,
+                                            tmdbId: widget.initialResult.tmdbId,
+                                            alternativePosterUrls: widget
+                                                .initialResult
+                                                .alternativePosterUrls,
+                                            searchResults: widget
+                                                .initialResult.searchResults,
+                                          );
+                                          widget.onSave(updatedResult);
+                                        }
+                                      } catch (e) {
+                                        debugPrint(
+                                            "⚠️  Failed to download new cover: $e");
+                                      }
+                                    }
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+                        if (widget.initialResult.searchResults != null &&
+                            widget.initialResult.searchResults!.isNotEmpty)
+                          IconButton(
+                            tooltip: 'Choose Match',
+                            icon: const Icon(Icons.compare_arrows),
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) => SearchResultsPickerModal(
+                                  searchResults:
+                                      widget.initialResult.searchResults!,
+                                  currentResult: widget.initialResult,
+                                  onSelected: (selectedResult) {
+                                    setState(() {
+                                      _titleController.text =
+                                          selectedResult.title ?? "";
+                                      _yearController.text =
+                                          selectedResult.year?.toString() ?? "";
+                                      _seasonController.text =
+                                          selectedResult.season?.toString() ??
+                                              "";
+                                      _episodeController.text =
+                                          selectedResult.episode?.toString() ??
+                                              "";
+                                      _episodeTitleController.text =
+                                          selectedResult.episodeTitle ?? "";
+                                      _descriptionController.text =
+                                          selectedResult.description ?? "";
+                                      _genresController.text =
+                                          selectedResult.genres?.join(', ') ??
+                                              "";
+                                      _directorController.text =
+                                          selectedResult.director ?? "";
+                                      _actorsController.text =
+                                          selectedResult.actors?.join(', ') ??
+                                              "";
+                                      _ratingController.text =
+                                          selectedResult.rating?.toString() ??
+                                              "";
+                                      _contentRatingController.text =
+                                          selectedResult.contentRating ?? "";
+                                      _runtimeController.text =
+                                          selectedResult.runtime?.toString() ??
+                                              "";
+                                      _posterUrlController.text =
+                                          selectedResult.posterUrl ?? "";
+                                      _type = selectedResult.type ?? 'movie';
+                                    });
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+                      ],
                     ),
                   ],
                 ),
@@ -526,106 +743,99 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
 
           const SizedBox(height: 20),
 
-          // Action Buttons - Simplified: Cancel or Apply & Rename
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              OutlinedButton(
-                onPressed: _isProcessing ? null : widget.onCancel,
-                child: const Text("Cancel"),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton.icon(
-                onPressed: _isProcessing
-                    ? null
-                    : () async {
-                        // Prevent double-clicks
-                        if (_isProcessing) return;
-                        setState(() => _isProcessing = true);
+          // Rename icon button
+          Align(
+            alignment: Alignment.bottomRight,
+            child: IconButton(
+              tooltip: 'Rename',
+              icon: _isProcessing
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : Icon(
+                      Icons.done,
+                      color: _isMetadataSuccessful()
+                          ? Theme.of(context).colorScheme.secondary
+                          : null,
+                    ),
+              onPressed: _isProcessing
+                  ? null
+                  : () async {
+                      // Prevent double-clicks
+                      if (_isProcessing) return;
+                      setState(() => _isProcessing = true);
 
-                        try {
-                          // Build the result first
-                          String newName = _nameController.text;
-                          String? poster = _posterUrlController.text.isEmpty
+                      try {
+                        // Build the result first
+                        String newName = _nameController.text;
+                        String? poster = _posterUrlController.text.isEmpty
+                            ? null
+                            : _posterUrlController.text;
+
+                        List<String>? genres = _genresController.text.isNotEmpty
+                            ? _genresController.text
+                                .split(',')
+                                .map((g) => g.trim())
+                                .where((g) => g.isNotEmpty)
+                                .toList()
+                            : null;
+
+                        List<String>? actors = _actorsController.text.isNotEmpty
+                            ? _actorsController.text
+                                .split(',')
+                                .map((a) => a.trim())
+                                .where((a) => a.isNotEmpty)
+                                .toList()
+                            : null;
+
+                        final result = MatchResult(
+                          newName: newName,
+                          posterUrl: poster,
+                          coverBytes: _updatedCoverBytes ??
+                              widget.initialResult.coverBytes,
+                          title: _titleController.text,
+                          year: int.tryParse(_yearController.text),
+                          season: int.tryParse(_seasonController.text),
+                          episode: int.tryParse(_episodeController.text),
+                          episodeTitle: _episodeTitleController.text,
+                          type: _type,
+                          description: _descriptionController.text.isEmpty
                               ? null
-                              : _posterUrlController.text;
+                              : _descriptionController.text,
+                          genres: genres,
+                          director: _directorController.text.isEmpty
+                              ? null
+                              : _directorController.text,
+                          actors: actors,
+                          rating: double.tryParse(_ratingController.text),
+                          contentRating: _contentRatingController.text.isEmpty
+                              ? null
+                              : _contentRatingController.text,
+                          runtime: int.tryParse(_runtimeController.text),
+                          studio: widget.initialResult.studio,
+                          imdbId: widget.initialResult.imdbId,
+                          tmdbId: widget.initialResult.tmdbId,
+                          alternativePosterUrls:
+                              widget.initialResult.alternativePosterUrls,
+                          searchResults: widget.initialResult.searchResults,
+                        );
 
-                          List<String>? genres =
-                              _genresController.text.isNotEmpty
-                                  ? _genresController.text
-                                      .split(',')
-                                      .map((g) => g.trim())
-                                      .where((g) => g.isNotEmpty)
-                                      .toList()
-                                  : null;
-
-                          List<String>? actors =
-                              _actorsController.text.isNotEmpty
-                                  ? _actorsController.text
-                                      .split(',')
-                                      .map((a) => a.trim())
-                                      .where((a) => a.isNotEmpty)
-                                      .toList()
-                                  : null;
-
-                          final result = MatchResult(
-                            newName: newName,
-                            posterUrl: poster,
-                            coverBytes: widget.initialResult.coverBytes,
-                            title: _titleController.text,
-                            year: int.tryParse(_yearController.text),
-                            season: int.tryParse(_seasonController.text),
-                            episode: int.tryParse(_episodeController.text),
-                            episodeTitle: _episodeTitleController.text,
-                            type: _type,
-                            description: _descriptionController.text.isEmpty
-                                ? null
-                                : _descriptionController.text,
-                            genres: genres,
-                            director: _directorController.text.isEmpty
-                                ? null
-                                : _directorController.text,
-                            actors: actors,
-                            rating: double.tryParse(_ratingController.text),
-                            contentRating: _contentRatingController.text.isEmpty
-                                ? null
-                                : _contentRatingController.text,
-                            runtime: int.tryParse(_runtimeController.text),
-                          );
-
-                          // Save first, then rename with the result
-                          widget.onSave(result);
-                          if (widget.onRename != null) {
-                            await widget.onRename!(result);
-                          }
-                        } finally {
-                          if (mounted) {
-                            setState(() => _isProcessing = false);
-                          }
+                        // Save first, then rename with the result
+                        widget.onSave(result);
+                        if (widget.onRename != null) {
+                          await widget.onRename!(result);
                         }
-                      },
-                icon: _isProcessing
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      )
-                    : const Icon(Icons.check, size: 18),
-                label: Text(_isProcessing ? "Processing..." : "Apply & Rename"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).colorScheme.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                ),
-              ),
-            ],
+                      } finally {
+                        if (mounted) {
+                          setState(() => _isProcessing = false);
+                        }
+                      }
+                    },
+            ),
           ),
         ],
       ),

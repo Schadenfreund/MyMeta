@@ -47,6 +47,26 @@ class OmdbService {
     return data;
   }
 
+  Future<List<Map<String, dynamic>>> searchMovieAll(String query, int? year,
+      {int limit = 10}) async {
+    var uri = Uri.parse('$_baseUrl/?apikey=$apiKey&s=$query&type=movie');
+    if (year != null) {
+      uri = uri.replace(
+          queryParameters: {...uri.queryParameters, 'y': year.toString()});
+    }
+
+    var response = await http.get(uri);
+
+    if (response.statusCode != 200) return [];
+
+    var data = jsonDecode(response.body);
+    if (data['Response'] == 'False') return [];
+
+    List results = (data['Search'] as List).take(limit).toList();
+
+    return results.cast<Map<String, dynamic>>();
+  }
+
   Future<Map<String, dynamic>?> searchSeries(String query) async {
     var uri = Uri.parse('$_baseUrl/?apikey=$apiKey&s=$query&type=series');
     var response = await http.get(uri);
@@ -61,6 +81,21 @@ class OmdbService {
     if (results.isEmpty) return null;
 
     return results[0];
+  }
+
+  Future<List<Map<String, dynamic>>> searchSeriesAll(String query,
+      {int limit = 10}) async {
+    var uri = Uri.parse('$_baseUrl/?apikey=$apiKey&s=$query&type=series');
+    var response = await http.get(uri);
+
+    if (response.statusCode != 200) return [];
+
+    var data = jsonDecode(response.body);
+    if (data['Response'] == 'False') return [];
+
+    List results = (data['Search'] as List).take(limit).toList();
+
+    return results.cast<Map<String, dynamic>>();
   }
 
   Future<Map<String, dynamic>?> getSeriesDetails(String imdbId) async {

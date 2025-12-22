@@ -1,52 +1,16 @@
-# Bundle FFmpeg with Simpler FileBot
-# This script downloads FFmpeg and places it in the build directory
+# DEPRECATED: This script is no longer used
+# MyMeta now downloads third-party tools via the Setup dialog in the application
+# Users install FFmpeg, MKVToolNix, and AtomicParsley directly from the app
+#
+# This file is kept for reference only and will be removed in a future version.
 
-Write-Host "📦 Bundling FFmpeg with Simpler FileBot..." -ForegroundColor Cyan
-
-$buildDir = "build\windows\x64\runner\Release"
-$ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
-$tempZip = "$env:TEMP\ffmpeg.zip"
-$tempExtract = "$env:TEMP\ffmpeg_extract"
-
-# Check if build directory exists
-if (!(Test-Path $buildDir)) {
-    Write-Host "❌ Build directory not found. Please run 'flutter build windows --release' first." -ForegroundColor Red
-    exit 1
-}
-
-# Download FFmpeg
-Write-Host "⬇️  Downloading FFmpeg..." -ForegroundColor Yellow
-try {
-    Invoke-WebRequest -Uri $ffmpegUrl -OutFile $tempZip -UseBasicParsing
-    Write-Host "✅ Downloaded FFmpeg" -ForegroundColor Green
-} catch {
-    Write-Host "❌ Failed to download FFmpeg: $_" -ForegroundColor Red
-    exit 1
-}
-
-# Extract
-Write-Host "📂 Extracting FFmpeg..." -ForegroundColor Yellow
-if (Test-Path $tempExtract) {
-    Remove-Item $tempExtract -Recurse -Force
-}
-Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
-
-# Find ffmpeg.exe
-$ffmpegExe = Get-ChildItem -Path $tempExtract -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
-
-if (!$ffmpegExe) {
-    Write-Host "❌ ffmpeg.exe not found in archive" -ForegroundColor Red
-    exit 1
-}
-
-# Copy to build directory
-Copy-Item $ffmpegExe.FullName -Destination "$buildDir\ffmpeg.exe" -Force
-Write-Host "✅ Copied ffmpeg.exe to build directory" -ForegroundColor Green
-
-# Cleanup
-Remove-Item $tempZip -Force
-Remove-Item $tempExtract -Recurse -Force
-
-Write-Host "`n✅ FFmpeg bundled successfully!" -ForegroundColor Green
-Write-Host "📁 Location: $buildDir\ffmpeg.exe" -ForegroundColor Cyan
-Write-Host "`n🚀 Your app is now ready to distribute!" -ForegroundColor Green
+Write-Host "⚠️  DEPRECATED: This script is no longer used" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "MyMeta no longer bundles third-party tools with the build." -ForegroundColor Cyan
+Write-Host "Instead, users can download tools directly from the app using the Setup dialog." -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Third-party tools:" -ForegroundColor White
+Write-Host "  • FFmpeg - Required for video processing" -ForegroundColor Gray
+Write-Host "  • MKVToolNix - Optional, for faster MKV processing" -ForegroundColor Gray
+Write-Host "  • AtomicParsley - Optional, for faster MP4 processing" -ForegroundColor Gray
+Write-Host ""

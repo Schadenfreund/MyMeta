@@ -360,7 +360,14 @@ Now that you're familiar with MyMeta:
 1. **Organize your collection** - Start with a small batch first
 2. **Customize colors** - Make it your own!
 3. **Tweak formats** - Perfect for your naming style
-4. **Check** [ARCHITECTURE.md](ARCHITECTURE.md) **for technical details**
+4. **Check documentation:**
+   - [ARCHITECTURE.md](ARCHITECTURE.md) for technical details
+   - [CHANGELOG.md](CHANGELOG.md) for updates and guidelines
+
+**New in v1.6.1:**
+- Redesigned settings and formats pages with consistent inline layouts
+- All cards now show title and description on the same line for better space usage
+- Improved visual consistency across the entire app
 
 ---
 

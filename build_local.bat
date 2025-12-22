@@ -44,7 +44,10 @@ echo.
 echo The executable is located at:
 echo build\windows\x64\runner\Release\MyMeta.exe
 echo.
-echo You can zip the content of 'build\windows\runner\Release' to share your app.
+echo NOTE: Third-party tools (FFmpeg, MKVToolNix, AtomicParsley) are NO LONGER bundled.
+echo Users can download them using the Setup dialog in the app.
+echo.
+echo You can zip the content of 'build\windows\x64\runner\Release' to share your app.
 echo.
 
 pause

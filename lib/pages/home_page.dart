@@ -132,7 +132,6 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildTabBar(Color accentColor, bool isDark) {
     final bgColor = isDark ? AppColors.darkSurface : AppColors.lightSurface;
-    final borderColor = isDark ? AppColors.darkBorder : AppColors.lightBorder;
     final secondaryColor =
         isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
 
@@ -141,7 +140,7 @@ class _HomePageState extends State<HomePage>
         color: bgColor,
         border: Border(
           bottom: BorderSide(
-            color: borderColor,
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
             width: 1,
           ),
         ),
@@ -156,6 +155,9 @@ class _HomePageState extends State<HomePage>
       child: TabBar(
         controller: _tabController,
         isScrollable: true,
+        tabAlignment: TabAlignment.start,
+        dividerColor:
+            isDark ? AppColors.darkBorder : AppColors.lightBorder,
         indicatorSize: TabBarIndicatorSize.label,
         indicatorWeight: 3.0,
         indicator: UnderlineTabIndicator(

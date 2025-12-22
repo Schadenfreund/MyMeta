@@ -35,6 +35,44 @@ class TmdbService {
     return results[0];
   }
 
+  // Get multiple search results for re-matching
+  Future<List<Map<String, dynamic>>> searchMovieAll(String query, int? year,
+      {int limit = 10}) async {
+    var uri = Uri.parse('$_baseUrl/search/movie?api_key=$apiKey&query=$query');
+    var response = await http.get(uri);
+
+    if (response.statusCode != 200) return [];
+
+    var data = jsonDecode(response.body);
+    List results = (data['results'] as List).take(limit).toList();
+
+    return results.cast<Map<String, dynamic>>();
+  }
+
+  // Get multiple alternative posters for the same movie
+  Future<List<String>> getMoviePosters(int movieId) async {
+    var uri = Uri.parse(
+        '$_baseUrl/movie/$movieId/images?api_key=$apiKey&language=en');
+    var response = await http.get(uri);
+
+    if (response.statusCode != 200) return [];
+
+    var data = jsonDecode(response.body);
+    List posters = data['posters'] ?? [];
+
+    // Return top 5 posters sorted by vote count
+    final sortedPosters = posters
+        .where((p) => p['file_path'] != null)
+        .toList()
+      ..sort((a, b) => (b['vote_count'] ?? 0)
+          .compareTo(a['vote_count'] ?? 0));
+
+    return sortedPosters
+        .take(5)
+        .map((p) => 'https://image.tmdb.org/t/p/w500${p['file_path']}')
+        .toList();
+  }
+
   Future<Map<String, dynamic>?> getMovieDetails(int movieId) async {
     var uri = Uri.parse(
         '$_baseUrl/movie/$movieId?api_key=$apiKey&append_to_response=credits,release_dates');
@@ -56,6 +94,44 @@ class TmdbService {
     if (results.isEmpty) return null;
 
     return results[0];
+  }
+
+  // Get multiple search results for TV shows
+  Future<List<Map<String, dynamic>>> searchTVAll(String query,
+      {int limit = 10}) async {
+    var uri = Uri.parse('$_baseUrl/search/tv?api_key=$apiKey&query=$query');
+    var response = await http.get(uri);
+
+    if (response.statusCode != 200) return [];
+
+    var data = jsonDecode(response.body);
+    List results = (data['results'] as List).take(limit).toList();
+
+    return results.cast<Map<String, dynamic>>();
+  }
+
+  // Get multiple alternative posters for the same TV show
+  Future<List<String>> getTVPosters(int tvId) async {
+    var uri =
+        Uri.parse('$_baseUrl/tv/$tvId/images?api_key=$apiKey&language=en');
+    var response = await http.get(uri);
+
+    if (response.statusCode != 200) return [];
+
+    var data = jsonDecode(response.body);
+    List posters = data['posters'] ?? [];
+
+    // Return top 5 posters sorted by vote count
+    final sortedPosters = posters
+        .where((p) => p['file_path'] != null)
+        .toList()
+      ..sort((a, b) => (b['vote_count'] ?? 0)
+          .compareTo(a['vote_count'] ?? 0));
+
+    return sortedPosters
+        .take(5)
+        .map((p) => 'https://image.tmdb.org/t/p/w500${p['file_path']}')
+        .toList();
   }
 
   Future<Map<String, dynamic>?> getTVDetails(int tvId) async {

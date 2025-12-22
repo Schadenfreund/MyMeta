@@ -21,6 +21,10 @@ class RenamerPage extends StatefulWidget {
 
 class _RenamerPageState extends State<RenamerPage> {
   int? _expandedIndex;
+  final Set<int> _searchedIndices =
+      {}; // Track which items have successful metadata searches
+  final Set<int> _renamingIndices =
+      {}; // Track which items are currently being renamed
 
   Future<void> _pickFiles(BuildContext context) async {
     FilePickerResult? result =
@@ -70,6 +74,39 @@ class _RenamerPageState extends State<RenamerPage> {
   void _toggleExpanded(int index) {
     setState(() {
       _expandedIndex = _expandedIndex == index ? null : index;
+    });
+  }
+
+  void _removeSearchedIndex(int index) {
+    setState(() {
+      // Shift all indices greater than the removed one
+      final toRemoveSearched = <int>{};
+      final toAddSearched = <int>{};
+      final toRemoveRenaming = <int>{};
+      final toAddRenaming = <int>{};
+
+      for (int idx in _searchedIndices) {
+        if (idx == index) {
+          toRemoveSearched.add(idx);
+        } else if (idx > index) {
+          toRemoveSearched.add(idx);
+          toAddSearched.add(idx - 1);
+        }
+      }
+
+      for (int idx in _renamingIndices) {
+        if (idx == index) {
+          toRemoveRenaming.add(idx);
+        } else if (idx > index) {
+          toRemoveRenaming.add(idx);
+          toAddRenaming.add(idx - 1);
+        }
+      }
+
+      _searchedIndices.removeAll(toRemoveSearched);
+      _searchedIndices.addAll(toAddSearched);
+      _renamingIndices.removeAll(toRemoveRenaming);
+      _renamingIndices.addAll(toAddRenaming);
     });
   }
 
@@ -134,7 +171,8 @@ class _RenamerPageState extends State<RenamerPage> {
             padding: const EdgeInsets.only(
               left: AppSpacing.md,
               right: AppSpacing.md,
-              top: AppSpacing.md,
+              // Increased top padding to avoid intersection with the retractable tab bar
+              top: AppDimensions.tabBarHeight + AppSpacing.md,
               bottom: 80, // Extra padding for floating buttons
             ),
             itemCount: fileState.inputFiles.length + 1, // +1 for add button
@@ -189,6 +227,78 @@ class _RenamerPageState extends State<RenamerPage> {
                   isDark: isDark,
                   isDestructive: true,
                 ),
+
+                // Search All Button - only if there are files without metadata
+                if (hasFiles) ...[
+                  const SizedBox(width: 8),
+                  _buildMinimalIconButton(
+                    context,
+                    icon: Icons.cloud_sync_outlined,
+                    tooltip: 'Search All',
+                    onPressed: () async {
+                      // Check if API keys are configured
+                      if (settings.metadataSource == 'tmdb' &&
+                          settings.tmdbApiKey.isEmpty) {
+                        SnackbarHelper.showWarning(
+                          context,
+                          'TMDB API key not configured. Go to Settings to add it.',
+                        );
+                        return;
+                      }
+                      if (settings.metadataSource == 'omdb' &&
+                          settings.omdbApiKey.isEmpty) {
+                        SnackbarHelper.showWarning(
+                          context,
+                          'OMDB API key not configured. Go to Settings to add it.',
+                        );
+                        return;
+                      }
+
+                      setState(() => _expandedIndex = null);
+
+                      SnackbarHelper.showInfo(
+                        context,
+                        'Searching metadata for all files...',
+                      );
+
+                      // Search metadata for all files
+                      int foundCount = 0;
+                      for (int i = 0; i < fileState.inputFiles.length; i++) {
+                        if (!fileState.inputFiles[i].isRenamed) {
+                          await fileState.matchSingleFile(i, settings);
+
+                          // Check if metadata was found
+                          if (i < fileState.matchResults.length) {
+                            final result = fileState.matchResults[i];
+                            if (result.title != null &&
+                                result.title!.isNotEmpty) {
+                              foundCount++;
+                              setState(() {
+                                _searchedIndices.add(i);
+                              });
+                            }
+                          }
+                        }
+                      }
+
+                      if (context.mounted) {
+                        if (foundCount > 0) {
+                          SnackbarHelper.showSuccess(
+                            context,
+                            'Found metadata for $foundCount file${foundCount > 1 ? 's' : ''}',
+                          );
+                        } else {
+                          SnackbarHelper.showWarning(
+                            context,
+                            'No metadata found. Try editing manually.',
+                          );
+                        }
+                      }
+                    },
+                    isDark: isDark,
+                    accentColor: settings.accentColor,
+                  ),
+                ],
 
                 // Rename All Button - only if there are files to rename
                 if (canRename) ...[
@@ -444,64 +554,8 @@ class _RenamerPageState extends State<RenamerPage> {
             child: Padding(
               padding: const EdgeInsets.all(AppSpacing.md),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Expand Icon
-                  Icon(
-                    isExpanded
-                        ? Icons.keyboard_arrow_down
-                        : Icons.keyboard_arrow_right,
-                    color: isRenamed
-                        ? AppColors.lightSuccess
-                        : Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-
-                  // Status Indicator (compact circular) - always show status
-                  Builder(
-                    builder: (context) {
-                      final hasMetadata = output != null &&
-                          output.title != null &&
-                          output.title!.isNotEmpty;
-
-                      IconData statusIcon;
-                      Color statusColor;
-                      String statusTooltip;
-
-                      if (isRenamed) {
-                        statusIcon = Icons.check;
-                        statusColor = AppColors.lightSuccess;
-                        statusTooltip = 'Renamed successfully';
-                      } else if (hasMetadata) {
-                        statusIcon = Icons.cloud_done_outlined;
-                        statusColor = Theme.of(context).colorScheme.primary;
-                        statusTooltip =
-                            'Metadata ready - click Rename to apply';
-                      } else {
-                        statusIcon = Icons.warning_amber_rounded;
-                        statusColor = Colors.orange;
-                        statusTooltip =
-                            'No metadata - click cloud icon to search';
-                      }
-
-                      return Tooltip(
-                        message: statusTooltip,
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: statusColor.withAlpha(38),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            statusIcon,
-                            size: 16,
-                            color: statusColor,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-
                   // Cover Image Thumbnail - use coverBytes if available, posterUrl as fallback
                   if (output?.coverBytes != null || output?.posterUrl != null)
                     Container(
@@ -536,15 +590,17 @@ class _RenamerPageState extends State<RenamerPage> {
                       ),
                     ),
 
-                  // File Info
+                  // File Info (Left side)
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
                           input.fileName,
                           style:
                               Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    fontSize: 14,
                                     fontWeight: FontWeight.w600,
                                     decoration: isRenamed
                                         ? TextDecoration.lineThrough
@@ -568,6 +624,7 @@ class _RenamerPageState extends State<RenamerPage> {
                             _buildMetadataPreview(output),
                             style:
                                 Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      fontSize: 12,
                                       color: isDark
                                           ? AppColors.darkTextSecondary
                                           : AppColors.lightTextSecondary,
@@ -580,6 +637,7 @@ class _RenamerPageState extends State<RenamerPage> {
                             "No metadata • Click to edit manually or use Match button",
                             style:
                                 Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      fontSize: 12,
                                       color: isDark
                                           ? AppColors.darkTextTertiary
                                           : AppColors.lightTextTertiary,
@@ -592,89 +650,87 @@ class _RenamerPageState extends State<RenamerPage> {
 
                   const SizedBox(width: AppSpacing.sm),
 
-                  // Arrow Icon / Status
-                  Icon(
-                    isRenamed ? Icons.check_circle : Icons.arrow_forward,
-                    color: isRenamed
-                        ? AppColors.lightSuccess
-                        : (isDark
-                            ? AppColors.darkTextTertiary
-                            : AppColors.lightTextTertiary),
+                  // Arrow Icon - always forward arrow for consistency
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Icon(
+                      Icons.arrow_forward,
+                      size: 20,
+                      color: isDark
+                          ? AppColors.darkTextTertiary
+                          : AppColors.lightTextTertiary,
+                    ),
                   ),
 
                   const SizedBox(width: AppSpacing.sm),
 
-                  // Output Name
+                  // Output Name (Right side)
                   Expanded(
-                    child: Text(
-                      isRenamed
-                          ? p.basename(input.renamedPath!)
-                          : (output?.newName ?? "Pending..."),
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: isRenamed
-                                ? AppColors.lightSuccess
-                                : Theme.of(context).colorScheme.primary,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          isRenamed
+                              ? p.basename(input.renamedPath!)
+                              : (output?.newName ?? "Pending..."),
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: isRenamed
+                                        ? AppColors.lightSuccess
+                                        : Theme.of(context).colorScheme.primary,
+                                  ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        // Subheader with metadata preview
+                        if (output != null &&
+                            output.title != null &&
+                            output.title!.isNotEmpty)
+                          Text(
+                            _buildMetadataPreview(output),
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  fontSize: 12,
+                                  color: isRenamed
+                                      ? AppColors.lightSuccess.withOpacity(0.7)
+                                      : (isDark
+                                          ? AppColors.darkTextSecondary
+                                          : AppColors.lightTextSecondary),
+                                ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          )
+                        else
+                          Text(
+                            isRenamed ? "Completed" : "Ready to rename",
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      fontSize: 12,
+                                      color: isDark
+                                          ? AppColors.darkTextTertiary
+                                          : AppColors.lightTextTertiary,
+                                      fontStyle: FontStyle.italic,
+                                    ),
                           ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      ],
                     ),
                   ),
 
-                  // Search Online Button
-                  if (!isRenamed)
-                    IconButton(
-                      icon: const Icon(Icons.cloud_download_outlined, size: 20),
-                      color: Theme.of(context).colorScheme.primary,
-                      onPressed: () async {
-                        final settings = context.read<SettingsService>();
-
-                        // Check if API keys are configured
-                        if (settings.metadataSource == 'tmdb' &&
-                            settings.tmdbApiKey.isEmpty) {
-                          SnackbarHelper.showWarning(
-                            context,
-                            'TMDB API key not configured. Go to Settings to add it.',
-                          );
-                          return;
-                        }
-                        if (settings.metadataSource == 'omdb' &&
-                            settings.omdbApiKey.isEmpty) {
-                          SnackbarHelper.showWarning(
-                            context,
-                            'OMDB API key not configured. Go to Settings to add it.',
-                          );
-                          return;
-                        }
-
-                        SnackbarHelper.showInfo(
-                          context,
-                          'Searching for "${input.fileName}"...',
-                        );
-
-                        await fileState.matchSingleFile(index, settings);
-
-                        if (context.mounted) {
-                          final result = fileState.matchResults.length > index
-                              ? fileState.matchResults[index]
-                              : null;
-                          if (result != null &&
-                              result.title != null &&
-                              result.title!.isNotEmpty) {
-                            SnackbarHelper.showSuccess(
-                              context,
-                              'Found: ${result.title}${result.year != null ? " (${result.year})" : ""}',
-                            );
-                          } else {
-                            SnackbarHelper.showWarning(
-                              context,
-                              'No match found. Try editing metadata manually.',
-                            );
-                          }
-                        }
-                      },
-                      tooltip: "Search online metadata",
-                    ),
+                  // Action Button (Search/Rename/Success indicator)
+                  _buildActionButton(
+                    context,
+                    index,
+                    isRenamed,
+                    output,
+                    fileState,
+                    isDark,
+                  ),
 
                   // Delete Button
                   IconButton(
@@ -684,6 +740,7 @@ class _RenamerPageState extends State<RenamerPage> {
                         : AppColors.lightTextSecondary,
                     onPressed: () {
                       if (isExpanded) _toggleExpanded(index);
+                      _removeSearchedIndex(index);
                       fileState.removeFileAt(index);
                     },
                     tooltip: "Remove",
@@ -703,6 +760,10 @@ class _RenamerPageState extends State<RenamerPage> {
               },
               onCancel: () => _toggleExpanded(index),
               onRename: (MatchResult result) async {
+                // DEBUG: Show what the editor is passing
+                debugPrint('🔔 ONRENAME CALLED:');
+                debugPrint('   Title from editor: "${result.title}"');
+                debugPrint('   Year from editor: ${result.year}');
                 // Update the match result first
                 fileState.updateManualMatch(index, result);
                 // Then rename
@@ -742,6 +803,171 @@ class _RenamerPageState extends State<RenamerPage> {
           ? ' • ${output.genres!.take(2).join(', ')}'
           : '';
       return "${output.title ?? 'Unknown Movie'}$year$genres";
+    }
+  }
+
+  /// Builds the action button (search/rename/success indicator)
+  /// Shows green checkmark when renamed, spinner when processing,
+  /// done icon when ready to rename, or cloud icon to search
+  Widget _buildActionButton(
+    BuildContext context,
+    int index,
+    bool isRenamed,
+    MatchResult? output,
+    FileStateService fileState,
+    bool isDark,
+  ) {
+    final MediaRecord input = fileState.inputFiles[index];
+    final settings = context.read<SettingsService>();
+
+    // Show green checkmark when successfully renamed
+    if (isRenamed) {
+      return IconButton(
+        icon: const Icon(Icons.check_circle, size: 20),
+        color: AppColors.lightSuccess,
+        onPressed: null, // Disabled when already renamed
+        tooltip: "Renamed successfully",
+      );
+    }
+
+    // Show spinner when processing
+    if (_renamingIndices.contains(index)) {
+      return IconButton(
+        icon: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation<Color>(
+              Theme.of(context).colorScheme.secondary,
+            ),
+          ),
+        ),
+        onPressed: null,
+        tooltip: "Processing...",
+      );
+    }
+
+    // Determine icon and color based on search state
+    final bool isSearched = _searchedIndices.contains(index);
+    final IconData icon =
+        isSearched ? Icons.done : Icons.cloud_download_outlined;
+    final Color color = isSearched
+        ? Theme.of(context).colorScheme.secondary
+        : Theme.of(context).colorScheme.primary;
+    final String tooltip = isSearched
+        ? "Metadata found - Click to rename"
+        : "Search online metadata";
+
+    return IconButton(
+      icon: Icon(icon, size: 20),
+      color: color,
+      onPressed: () => _handleActionButtonPress(
+        context,
+        index,
+        isSearched,
+        input,
+        fileState,
+        settings,
+      ),
+      tooltip: tooltip,
+    );
+  }
+
+  /// Handles action button press - either searches or renames
+  Future<void> _handleActionButtonPress(
+    BuildContext context,
+    int index,
+    bool isSearched,
+    MediaRecord input,
+    FileStateService fileState,
+    SettingsService settings,
+  ) async {
+    // If metadata already found, rename the file
+    if (isSearched) {
+      await _performRename(context, index, fileState, settings);
+      return;
+    }
+
+    // Otherwise, search for metadata
+    await _performSearch(context, index, input, fileState, settings);
+  }
+
+  /// Performs the rename operation for a single file
+  Future<void> _performRename(
+    BuildContext context,
+    int index,
+    FileStateService fileState,
+    SettingsService settings,
+  ) async {
+    setState(() => _renamingIndices.add(index));
+
+    final success = await fileState.renameSingleFile(index, settings: settings);
+
+    if (!context.mounted) return;
+
+    setState(() {
+      _renamingIndices.remove(index);
+      if (success) {
+        _searchedIndices.remove(index);
+      }
+    });
+
+    if (success) {
+      SnackbarHelper.showSuccess(context, 'File renamed successfully!');
+    } else {
+      SnackbarHelper.showError(context, 'Failed to rename file.');
+    }
+  }
+
+  /// Performs metadata search for a single file
+  Future<void> _performSearch(
+    BuildContext context,
+    int index,
+    MediaRecord input,
+    FileStateService fileState,
+    SettingsService settings,
+  ) async {
+    // Check if API keys are configured
+    if (settings.metadataSource == 'tmdb' && settings.tmdbApiKey.isEmpty) {
+      SnackbarHelper.showWarning(
+        context,
+        'TMDB API key not configured. Go to Settings to add it.',
+      );
+      return;
+    }
+    if (settings.metadataSource == 'omdb' && settings.omdbApiKey.isEmpty) {
+      SnackbarHelper.showWarning(
+        context,
+        'OMDB API key not configured. Go to Settings to add it.',
+      );
+      return;
+    }
+
+    SnackbarHelper.showInfo(
+      context,
+      'Searching for "${input.fileName}"...',
+    );
+
+    await fileState.matchSingleFile(index, settings);
+
+    if (!context.mounted) return;
+
+    final result = fileState.matchResults.length > index
+        ? fileState.matchResults[index]
+        : null;
+
+    if (result != null && result.title != null && result.title!.isNotEmpty) {
+      setState(() => _searchedIndices.add(index));
+      SnackbarHelper.showSuccess(
+        context,
+        'Found: ${result.title}${result.year != null ? " (${result.year})" : ""}',
+      );
+    } else {
+      SnackbarHelper.showWarning(
+        context,
+        'No match found. Try editing metadata manually.',
+      );
     }
   }
 }

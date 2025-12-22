@@ -103,7 +103,8 @@ class CoverExtractor {
   ) async {
     try {
       print('  🔍 Resolving AtomicParsley...');
-      String? atomicParsleyPath = await _resolveAtomicParsley(settings: settings);
+      String? atomicParsleyPath =
+          await _resolveAtomicParsley(settings: settings);
       if (atomicParsleyPath == null) {
         print('  ⚠️  AtomicParsley not found (download from GitHub)');
         return null;
@@ -173,18 +174,30 @@ class CoverExtractor {
     return null;
   }
 
-  /// Resolve AtomicParsley path (3-tier: custom → bundled → PATH)
-  static Future<String?> _resolveAtomicParsley({SettingsService? settings}) async {
+  /// Resolve AtomicParsley path (UserData → custom → bundled → PATH)
+  static Future<String?> _resolveAtomicParsley(
+      {SettingsService? settings}) async {
+    // 0. Try UserData/tools folder first
+    try {
+      final exePath = Platform.resolvedExecutable;
+      final exeDir = p.dirname(exePath);
+      final userDataTool = p.join(
+          exeDir, 'UserData', 'tools', 'atomicparsley', 'AtomicParsley.exe');
+      if (File(userDataTool).existsSync()) return userDataTool;
+    } catch (_) {}
+
     // 1. Try custom path from settings
     if (settings != null && settings.atomicparsleyPath.isNotEmpty) {
-      final binPath = p.join(settings.atomicparsleyPath, 'bin', 'AtomicParsley.exe');
+      final binPath =
+          p.join(settings.atomicparsleyPath, 'bin', 'AtomicParsley.exe');
       if (File(binPath).existsSync()) return binPath;
 
-      final directPath = p.join(settings.atomicparsleyPath, 'AtomicParsley.exe');
+      final directPath =
+          p.join(settings.atomicparsleyPath, 'AtomicParsley.exe');
       if (File(directPath).existsSync()) return directPath;
     }
 
-    // 2. Try bundled tool
+    // 2. Try bundled tool (deprecated - will be removed)
     try {
       final exePath = Platform.resolvedExecutable;
       final exeDir = p.dirname(exePath);
@@ -309,8 +322,17 @@ class CoverExtractor {
     return null;
   }
 
-  /// Get FFmpeg executable path
+  /// Get FFmpeg executable path (UserData → custom → bundled → PATH)
   static Future<String?> _getFFmpegPath(SettingsService? settings) async {
+    // 0. Try UserData/tools folder first
+    try {
+      final exePath = Platform.resolvedExecutable;
+      final exeDir = p.dirname(exePath);
+      final userDataTool =
+          p.join(exeDir, 'UserData', 'tools', 'ffmpeg', 'ffmpeg.exe');
+      if (File(userDataTool).existsSync()) return userDataTool;
+    } catch (_) {}
+
     // 1. Custom folder
     if (settings != null && settings.ffmpegPath.isNotEmpty) {
       final binPath = p.join(settings.ffmpegPath, 'bin', 'ffmpeg.exe');
@@ -320,7 +342,7 @@ class CoverExtractor {
       if (File(directPath).existsSync()) return directPath;
     }
 
-    // 2. Bundled
+    // 2. Bundled (deprecated - will be removed)
     try {
       final exePath = Platform.resolvedExecutable;
       final bundled = p.join(p.dirname(exePath), 'ffmpeg.exe');
