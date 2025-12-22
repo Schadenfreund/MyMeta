@@ -908,6 +908,43 @@ class CoreBackend {
           tags['subtitle'] ??
           tags['SUBTITLE'];
 
+      // Also check filename for S##E## pattern if tags don't have season/episode
+      if (season == null || episode == null) {
+        String filename = p.basenameWithoutExtension(filePath);
+        // Match patterns like S01E02, s1e5, S01E02, etc.
+        RegExpMatch? match =
+            RegExp(r'[Ss](\d{1,2})[Ee](\d{1,2})').firstMatch(filename);
+        if (match != null) {
+          season ??= int.tryParse(match.group(1)!);
+          episode ??= int.tryParse(match.group(2)!);
+
+          // Also try to extract episode title (text after S##E## - <title>)
+          if (episodeTitle == null) {
+            int afterPattern = match.end;
+            String after = filename.substring(afterPattern).trim();
+            // Remove leading separators like " - " or "."
+            after = after.replaceFirst(RegExp(r'^[\s\-\.]+'), '');
+            if (after.isNotEmpty) {
+              episodeTitle = after;
+            }
+          }
+
+          // Extract show name (text before S##E##)
+          if (show == null || show.isEmpty) {
+            String before = filename.substring(0, match.start).trim();
+            // Remove trailing separators
+            before = before.replaceFirst(RegExp(r'[\s\-\.]+$'), '');
+            if (before.isNotEmpty) {
+              show = before;
+              // If title wasn't set, use show name
+              if (title == null || title.isEmpty) {
+                title = show;
+              }
+            }
+          }
+        }
+      }
+
       // Determine type
       String type = (season != null && episode != null) ? 'episode' : 'movie';
 
@@ -1150,8 +1187,29 @@ class CoreBackend {
       bool hasAttachment = false;
       bool hasTags = false;
 
-      // Step 1: Attach cover
+      // Step 1: Attach cover (delete existing covers first to prevent duplicates!)
       if (coverPath != null && File(coverPath).existsSync()) {
+        // First, find all existing cover attachments
+        var identifyResult = await Process.run(
+            toolPath.replaceAll('mkvpropedit.exe', 'mkvmerge.exe'),
+            ['--identify', filePath],
+            runInShell: false);
+
+        // Parse attachment IDs that need to be deleted
+        List<String> deleteArgs = [filePath];
+        RegExp attachmentRegex = RegExp(r'Attachment ID (\d+):.*cover');
+        for (var match
+            in attachmentRegex.allMatches(identifyResult.stdout.toString())) {
+          deleteArgs.addAll(['--delete-attachment', match.group(1)!]);
+        }
+
+        // Delete existing covers if any found
+        if (deleteArgs.length > 1) {
+          await Process.run(toolPath, deleteArgs, runInShell: false);
+          print('Removed ${(deleteArgs.length - 1) ~/ 2} old cover(s)');
+        }
+
+        // Now add the new cover
         var result = await Process.run(
             toolPath,
             [
@@ -1189,13 +1247,6 @@ class CoreBackend {
           tagCount++;
         }
       }
-
-      // DEBUG: Show what values we're writing
-      print('📝 VALUES BEING WRITTEN:');
-      print('   Title: "${metadata.title}"');
-      print('   Year: ${metadata.year}');
-      print(
-          '   Description: "${metadata.description?.substring(0, (metadata.description?.length ?? 0) > 50 ? 50 : metadata.description?.length ?? 0)}..."');
 
       addTag('TITLE', metadata.title);
       if (metadata.year != null)

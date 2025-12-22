@@ -18,6 +18,7 @@ class InlineMetadataEditor extends StatefulWidget {
   final VoidCallback onCancel;
   final Future<void> Function(MatchResult)?
       onRename; // Receives result directly
+  final VoidCallback? onSearch; // Triggers online search
 
   const InlineMetadataEditor({
     super.key,
@@ -26,6 +27,7 @@ class InlineMetadataEditor extends StatefulWidget {
     required this.onSave,
     required this.onCancel,
     this.onRename,
+    this.onSearch,
   });
 
   @override
@@ -49,7 +51,6 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
   late TextEditingController _runtimeController;
 
   String _type = 'movie';
-  bool _isProcessing = false; // Prevents double-clicking
   Uint8List? _updatedCoverBytes; // Stores new cover when user changes it
 
   @override
@@ -79,7 +80,97 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
     _runtimeController =
         TextEditingController(text: res.runtime?.toString() ?? "");
 
-    _type = res.type ?? 'movie';
+    // Smart type detection
+    _type = _detectContentType(res);
+
+    // Add listeners to auto-save changes
+    _titleController.addListener(_saveChanges);
+    _yearController.addListener(_saveChanges);
+    _seasonController.addListener(_saveChanges);
+    _episodeController.addListener(_saveChanges);
+    _episodeTitleController.addListener(_saveChanges);
+    _descriptionController.addListener(_saveChanges);
+    _genresController.addListener(_saveChanges);
+    _directorController.addListener(_saveChanges);
+    _actorsController.addListener(_saveChanges);
+  }
+
+  /// Saves current editor state to parent
+  void _saveChanges() {
+    if (!mounted) return;
+
+    List<String>? genres = _genresController.text.isNotEmpty
+        ? _genresController.text
+            .split(',')
+            .map((g) => g.trim())
+            .where((g) => g.isNotEmpty)
+            .toList()
+        : null;
+
+    List<String>? actors = _actorsController.text.isNotEmpty
+        ? _actorsController.text
+            .split(',')
+            .map((a) => a.trim())
+            .where((a) => a.isNotEmpty)
+            .toList()
+        : null;
+
+    final result = MatchResult(
+      newName: _nameController.text,
+      posterUrl:
+          _posterUrlController.text.isEmpty ? null : _posterUrlController.text,
+      coverBytes: _updatedCoverBytes ?? widget.initialResult.coverBytes,
+      title: _titleController.text,
+      year: int.tryParse(_yearController.text),
+      season: int.tryParse(_seasonController.text),
+      episode: int.tryParse(_episodeController.text),
+      episodeTitle: _episodeTitleController.text,
+      type: _type,
+      description: _descriptionController.text.isEmpty
+          ? null
+          : _descriptionController.text,
+      genres: genres,
+      director:
+          _directorController.text.isEmpty ? null : _directorController.text,
+      actors: actors,
+      rating: double.tryParse(_ratingController.text),
+      contentRating: _contentRatingController.text.isEmpty
+          ? null
+          : _contentRatingController.text,
+      runtime: int.tryParse(_runtimeController.text),
+      studio: widget.initialResult.studio,
+      imdbId: widget.initialResult.imdbId,
+      tmdbId: widget.initialResult.tmdbId,
+      alternativePosterUrls: widget.initialResult.alternativePosterUrls,
+      searchResults: widget.initialResult.searchResults,
+    );
+
+    widget.onSave(result);
+  }
+
+  /// Detects if content is Movie or TV Show based on available data
+  String _detectContentType(MatchResult res) {
+    // Priority 1: Has season/episode data => TV Show
+    if (res.season != null && res.episode != null) {
+      return 'episode';
+    }
+
+    // Priority 2: Check filename for TV patterns (S##E##, episode, etc.)
+    String filename = widget.originalName.toLowerCase();
+    if (RegExp(r's\d{1,2}e\d{1,2}').hasMatch(filename) ||
+        RegExp(r'\d{1,2}x\d{1,2}').hasMatch(filename) ||
+        filename.contains('episode') ||
+        filename.contains('season')) {
+      return 'episode';
+    }
+
+    // Priority 3: Use stored type if available
+    if (res.type != null && res.type!.isNotEmpty) {
+      return res.type!;
+    }
+
+    // Default: Movie
+    return 'movie';
   }
 
   @override
@@ -102,6 +193,9 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
       _ratingController.text = res.rating?.toString() ?? "";
       _contentRatingController.text = res.contentRating ?? "";
       _runtimeController.text = res.runtime?.toString() ?? "";
+
+      // Reset cover bytes so it uses new data from search
+      _updatedCoverBytes = null;
 
       // Also update internal state if needed
       if ((res.type == 'movie' || res.type == 'episode') && res.type != _type) {
@@ -176,23 +270,6 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
     });
   }
 
-  /// Paste image URL or path from clipboard
-  Future<void> _pasteFromClipboard() async {
-    final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
-    if (clipboardData?.text != null && clipboardData!.text!.isNotEmpty) {
-      final text = clipboardData.text!.trim();
-      // Check if it's a URL or a file path
-      if (text.startsWith('http') ||
-          text.startsWith('https') ||
-          text.contains('\\') ||
-          text.contains('/')) {
-        setState(() {
-          _posterUrlController.text = text;
-        });
-      }
-    }
-  }
-
   /// Show context menu for cover art
   void _showCoverContextMenu(BuildContext context, Offset position) {
     showMenu<String>(
@@ -208,9 +285,29 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
           value: 'paste',
           child: Row(
             children: [
-              Icon(Icons.paste, size: 18),
+              Icon(Icons.content_paste, size: 18),
               SizedBox(width: 8),
-              Text('Paste Image URL'),
+              Text('Paste Image'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'pick',
+          child: Row(
+            children: [
+              Icon(Icons.folder_open, size: 18),
+              SizedBox(width: 8),
+              Text('Choose File...'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'gallery',
+          child: Row(
+            children: [
+              Icon(Icons.photo_library_outlined, size: 18),
+              SizedBox(width: 8),
+              Text('Browse Gallery'),
             ],
           ),
         ),
@@ -227,26 +324,153 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
       ],
     ).then((value) {
       if (value == 'paste') {
-        _pasteFromClipboard();
+        _pasteImageFromClipboard();
+      } else if (value == 'pick') {
+        _pickCustomImage();
+      } else if (value == 'gallery') {
+        _openCoverGallery();
       } else if (value == 'clear') {
         setState(() {
           _posterUrlController.text = '';
+          _updatedCoverBytes = null;
         });
+        _saveChanges();
       }
     });
   }
 
-  bool _isMetadataSuccessful() {
-    // Check if online metadata search was successful by looking for key fields
-    return widget.initialResult.title != null &&
-        (widget.initialResult.title!.isNotEmpty) &&
-        (widget.initialResult.year != null ||
-            widget.initialResult.genres != null ||
-            widget.initialResult.posterUrl != null);
+  /// Paste image from clipboard
+  Future<void> _pasteImageFromClipboard() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      if (data?.text != null && data!.text!.isNotEmpty) {
+        final url = data.text!.trim();
+        if (url.startsWith('http')) {
+          setState(() => _posterUrlController.text = url);
+          // Download the image
+          try {
+            final response = await http.get(Uri.parse(url));
+            if (response.statusCode == 200 && mounted) {
+              setState(() => _updatedCoverBytes = response.bodyBytes);
+              _saveChanges();
+            }
+          } catch (e) {
+            debugPrint("⚠️  Failed to download pasted URL: $e");
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("⚠️  Failed to paste from clipboard: $e");
+    }
+  }
+
+  /// Pick custom image from file system
+  Future<void> _pickCustomImage() async {
+    var res = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (res != null && res.files.single.path != null) {
+      final path = res.files.single.path!;
+      try {
+        final file = File(path);
+        if (file.existsSync()) {
+          final bytes = await file.readAsBytes();
+          setState(() {
+            _posterUrlController.text = path;
+            _updatedCoverBytes = bytes;
+          });
+          _saveChanges();
+        }
+      } catch (e) {
+        debugPrint("⚠️  Failed to load custom image: $e");
+      }
+    }
+  }
+
+  /// Open cover gallery dialog
+  void _openCoverGallery() {
+    if (widget.initialResult.alternativePosterUrls != null &&
+        widget.initialResult.alternativePosterUrls!.isNotEmpty) {
+      showDialog(
+        context: context,
+        builder: (context) => CoverPickerModal(
+          posterUrls: widget.initialResult.alternativePosterUrls!,
+          currentPosterUrl: _posterUrlController.text,
+          onSelected: (url) async {
+            setState(() {
+              _posterUrlController.text = url;
+              _updatedCoverBytes = null;
+            });
+            if (url.startsWith('http')) {
+              try {
+                final response = await http.get(Uri.parse(url));
+                if (response.statusCode == 200 && mounted) {
+                  setState(() => _updatedCoverBytes = response.bodyBytes);
+                  _saveChanges();
+                }
+              } catch (e) {
+                debugPrint("⚠️  Failed to download cover: $e");
+              }
+            }
+          },
+        ),
+      );
+    } else {
+      widget.onSearch?.call();
+    }
+  }
+
+  /// Open search results dialog
+  void _openSearchResults() {
+    if (widget.initialResult.searchResults != null &&
+        widget.initialResult.searchResults!.isNotEmpty) {
+      showDialog(
+        context: context,
+        builder: (context) => SearchResultsPickerModal(
+          searchResults: widget.initialResult.searchResults!,
+          currentResult: widget.initialResult,
+          onSelected: (selectedResult) {
+            setState(() {
+              _titleController.text = selectedResult.title ?? "";
+              _yearController.text = selectedResult.year?.toString() ?? "";
+              _seasonController.text = selectedResult.season?.toString() ?? "";
+              _episodeController.text =
+                  selectedResult.episode?.toString() ?? "";
+              _episodeTitleController.text = selectedResult.episodeTitle ?? "";
+              _descriptionController.text = selectedResult.description ?? "";
+              _genresController.text = selectedResult.genres?.join(', ') ?? "";
+              _directorController.text = selectedResult.director ?? "";
+              _actorsController.text = selectedResult.actors?.join(', ') ?? "";
+              _ratingController.text = selectedResult.rating?.toString() ?? "";
+              _contentRatingController.text =
+                  selectedResult.contentRating ?? "";
+              _runtimeController.text =
+                  selectedResult.runtime?.toString() ?? "";
+              _posterUrlController.text = selectedResult.posterUrl ?? "";
+              _type = selectedResult.type ?? 'movie';
+            });
+          },
+        ),
+      );
+    } else {
+      widget.onSearch?.call();
+    }
+  }
+
+  /// Build no cover placeholder
+  Widget _buildNoCoverPlaceholder() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.add_photo_alternate_outlined, size: 40, color: Colors.grey),
+        const SizedBox(height: 8),
+        Text("Click or Drop Image",
+            style: TextStyle(color: Colors.grey, fontSize: 12)),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.all(20),
@@ -254,7 +478,7 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+          color: settings.accentColor.withOpacity(0.3),
           width: 2,
         ),
       ),
@@ -264,16 +488,15 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
           // Header with Type Selector
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  "Edit Metadata",
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
+              Text(
+                "Edit Metadata",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: settings.accentColor,
                 ),
               ),
+              const Spacer(),
               // Type Selector
               Container(
                 padding: const EdgeInsets.all(4),
@@ -286,7 +509,7 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
                   children: [
                     _buildTypeButton("Movie", "movie"),
                     const SizedBox(width: 4),
-                    _buildTypeButton("Episode", "episode"),
+                    _buildTypeButton("TV Show", "episode"),
                   ],
                 ),
               ),
@@ -306,26 +529,41 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
                     AspectRatio(
                       aspectRatio: 2 / 3,
                       child: GestureDetector(
+                        onTap: () => _openCoverGallery(),
                         onSecondaryTapUp: (details) {
                           _showCoverContextMenu(
                               context, details.globalPosition);
                         },
                         child: DropTarget(
-                          onDragDone: (detail) {
+                          onDragDone: (detail) async {
                             if (detail.files.isNotEmpty) {
-                              setState(() {
-                                _posterUrlController.text =
-                                    detail.files.first.path;
-                              });
+                              final path = detail.files.first.path;
+                              try {
+                                final file = File(path);
+                                if (file.existsSync()) {
+                                  final bytes = await file.readAsBytes();
+                                  setState(() {
+                                    _posterUrlController.text = path;
+                                    _updatedCoverBytes = bytes;
+                                  });
+                                  _saveChanges();
+                                }
+                              } catch (e) {
+                                debugPrint(
+                                    "⚠️  Failed to load dropped image: $e");
+                              }
                             }
                           },
                           child: Container(
                             decoration: BoxDecoration(
-                              border: Border.all(
-                                color: Theme.of(context).dividerColor,
-                              ),
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceVariant
+                                  .withOpacity(0.5),
                               borderRadius: BorderRadius.circular(8),
-                              color: Theme.of(context).colorScheme.surface,
+                              border: Border.all(
+                                color: settings.accentColor.withOpacity(0.2),
+                              ),
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(8),
@@ -345,240 +583,38 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
                                           width: double.infinity,
                                           height: double.infinity,
                                           errorBuilder:
-                                              (context, error, stack) {
-                                            return Column(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: const [
-                                                Icon(Icons.broken_image,
-                                                    size: 40,
-                                                    color: Colors.grey),
-                                                SizedBox(height: 8),
-                                                Text("Image Error",
-                                                    style: TextStyle(
-                                                        color: Colors.grey)),
-                                              ],
-                                            );
-                                          },
+                                              (context, error, stack) =>
+                                                  _buildNoCoverPlaceholder(),
                                         )
-                                      : Column(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: const [
-                                            Icon(
-                                                Icons
-                                                    .add_photo_alternate_outlined,
-                                                size: 40,
-                                                color: Colors.grey),
-                                            SizedBox(height: 8),
-                                            Text("Drop Image",
-                                                style: TextStyle(
-                                                    color: Colors.grey)),
-                                          ],
-                                        )),
+                                      : _buildNoCoverPlaceholder()),
                             ),
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
+                    // Centered action icons
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         IconButton(
-                          tooltip: 'Select Image',
-                          icon: const Icon(Icons.upload_file),
-                          onPressed: () async {
-                            var res = await FilePicker.platform
-                                .pickFiles(type: FileType.image);
-                            if (res != null && res.files.single.path != null) {
-                              final path = res.files.single.path!;
-                              setState(() {
-                                _posterUrlController.text = path;
-                              });
-
-                              // Load file bytes for local file
-                              try {
-                                final file = File(path);
-                                if (file.existsSync()) {
-                                  final bytes = await file.readAsBytes();
-                                  setState(() {
-                                    _updatedCoverBytes = bytes;
-                                  });
-                                  debugPrint(
-                                      "✅ Local cover loaded (${bytes.length} bytes)");
-
-                                  // Update the MatchResult immediately so thumbnail updates
-                                  final updatedResult = MatchResult(
-                                    newName: widget.initialResult.newName,
-                                    posterUrl: path,
-                                    coverBytes: bytes,
-                                    title: widget.initialResult.title,
-                                    year: widget.initialResult.year,
-                                    season: widget.initialResult.season,
-                                    episode: widget.initialResult.episode,
-                                    episodeTitle:
-                                        widget.initialResult.episodeTitle,
-                                    type: widget.initialResult.type,
-                                    description:
-                                        widget.initialResult.description,
-                                    genres: widget.initialResult.genres,
-                                    director: widget.initialResult.director,
-                                    actors: widget.initialResult.actors,
-                                    rating: widget.initialResult.rating,
-                                    contentRating:
-                                        widget.initialResult.contentRating,
-                                    studio: widget.initialResult.studio,
-                                    runtime: widget.initialResult.runtime,
-                                    imdbId: widget.initialResult.imdbId,
-                                    tmdbId: widget.initialResult.tmdbId,
-                                    alternativePosterUrls: widget
-                                        .initialResult.alternativePosterUrls,
-                                    searchResults:
-                                        widget.initialResult.searchResults,
-                                  );
-                                  widget.onSave(updatedResult);
-                                }
-                              } catch (e) {
-                                debugPrint(
-                                    "⚠️  Failed to load local cover: $e");
-                              }
-                            }
-                          },
+                          icon: Icon(Icons.image_outlined,
+                              color: settings.accentColor),
+                          tooltip: 'Custom Image',
+                          onPressed: () => _pickCustomImage(),
                         ),
-                        if (widget.initialResult.alternativePosterUrls !=
-                                null &&
-                            widget.initialResult.alternativePosterUrls!
-                                .isNotEmpty)
-                          IconButton(
-                            tooltip: 'Choose Cover',
-                            icon: const Icon(Icons.image_search),
-                            onPressed: () {
-                              showDialog(
-                                context: context,
-                                builder: (context) => CoverPickerModal(
-                                  posterUrls: widget
-                                      .initialResult.alternativePosterUrls!,
-                                  currentPosterUrl: _posterUrlController.text,
-                                  onSelected: (url) async {
-                                    // Download new cover immediately
-                                    setState(() {
-                                      _posterUrlController.text = url;
-                                      _updatedCoverBytes =
-                                          null; // Clear old bytes
-                                    });
-
-                                    if (url.startsWith('http')) {
-                                      try {
-                                        final response =
-                                            await http.get(Uri.parse(url));
-                                        if (response.statusCode == 200 &&
-                                            mounted) {
-                                          setState(() {
-                                            _updatedCoverBytes =
-                                                response.bodyBytes;
-                                          });
-                                          debugPrint(
-                                              "✅ New cover downloaded (${response.bodyBytes.length} bytes)");
-
-                                          // Update the MatchResult immediately so thumbnail updates
-                                          final updatedResult = MatchResult(
-                                            newName:
-                                                widget.initialResult.newName,
-                                            posterUrl: url,
-                                            coverBytes: response.bodyBytes,
-                                            title: widget.initialResult.title,
-                                            year: widget.initialResult.year,
-                                            season: widget.initialResult.season,
-                                            episode:
-                                                widget.initialResult.episode,
-                                            episodeTitle: widget
-                                                .initialResult.episodeTitle,
-                                            type: widget.initialResult.type,
-                                            description: widget
-                                                .initialResult.description,
-                                            genres: widget.initialResult.genres,
-                                            director:
-                                                widget.initialResult.director,
-                                            actors: widget.initialResult.actors,
-                                            rating: widget.initialResult.rating,
-                                            contentRating: widget
-                                                .initialResult.contentRating,
-                                            studio: widget.initialResult.studio,
-                                            runtime:
-                                                widget.initialResult.runtime,
-                                            imdbId: widget.initialResult.imdbId,
-                                            tmdbId: widget.initialResult.tmdbId,
-                                            alternativePosterUrls: widget
-                                                .initialResult
-                                                .alternativePosterUrls,
-                                            searchResults: widget
-                                                .initialResult.searchResults,
-                                          );
-                                          widget.onSave(updatedResult);
-                                        }
-                                      } catch (e) {
-                                        debugPrint(
-                                            "⚠️  Failed to download new cover: $e");
-                                      }
-                                    }
-                                  },
-                                ),
-                              );
-                            },
-                          ),
-                        if (widget.initialResult.searchResults != null &&
-                            widget.initialResult.searchResults!.isNotEmpty)
-                          IconButton(
-                            tooltip: 'Choose Match',
-                            icon: const Icon(Icons.compare_arrows),
-                            onPressed: () {
-                              showDialog(
-                                context: context,
-                                builder: (context) => SearchResultsPickerModal(
-                                  searchResults:
-                                      widget.initialResult.searchResults!,
-                                  currentResult: widget.initialResult,
-                                  onSelected: (selectedResult) {
-                                    setState(() {
-                                      _titleController.text =
-                                          selectedResult.title ?? "";
-                                      _yearController.text =
-                                          selectedResult.year?.toString() ?? "";
-                                      _seasonController.text =
-                                          selectedResult.season?.toString() ??
-                                              "";
-                                      _episodeController.text =
-                                          selectedResult.episode?.toString() ??
-                                              "";
-                                      _episodeTitleController.text =
-                                          selectedResult.episodeTitle ?? "";
-                                      _descriptionController.text =
-                                          selectedResult.description ?? "";
-                                      _genresController.text =
-                                          selectedResult.genres?.join(', ') ??
-                                              "";
-                                      _directorController.text =
-                                          selectedResult.director ?? "";
-                                      _actorsController.text =
-                                          selectedResult.actors?.join(', ') ??
-                                              "";
-                                      _ratingController.text =
-                                          selectedResult.rating?.toString() ??
-                                              "";
-                                      _contentRatingController.text =
-                                          selectedResult.contentRating ?? "";
-                                      _runtimeController.text =
-                                          selectedResult.runtime?.toString() ??
-                                              "";
-                                      _posterUrlController.text =
-                                          selectedResult.posterUrl ?? "";
-                                      _type = selectedResult.type ?? 'movie';
-                                    });
-                                  },
-                                ),
-                              );
-                            },
-                          ),
+                        IconButton(
+                          icon: Icon(Icons.photo_library_outlined,
+                              color: settings.accentColor),
+                          tooltip: 'Gallery',
+                          onPressed: () => _openCoverGallery(),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.manage_search,
+                              color: settings.accentColor),
+                          tooltip: 'Fix Match',
+                          onPressed: () => _openSearchResults(),
+                        ),
                       ],
                     ),
                   ],
@@ -740,103 +776,6 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
               ),
             ],
           ),
-
-          const SizedBox(height: 20),
-
-          // Rename icon button
-          Align(
-            alignment: Alignment.bottomRight,
-            child: IconButton(
-              tooltip: 'Rename',
-              icon: _isProcessing
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : Icon(
-                      Icons.done,
-                      color: _isMetadataSuccessful()
-                          ? Theme.of(context).colorScheme.secondary
-                          : null,
-                    ),
-              onPressed: _isProcessing
-                  ? null
-                  : () async {
-                      // Prevent double-clicks
-                      if (_isProcessing) return;
-                      setState(() => _isProcessing = true);
-
-                      try {
-                        // Build the result first
-                        String newName = _nameController.text;
-                        String? poster = _posterUrlController.text.isEmpty
-                            ? null
-                            : _posterUrlController.text;
-
-                        List<String>? genres = _genresController.text.isNotEmpty
-                            ? _genresController.text
-                                .split(',')
-                                .map((g) => g.trim())
-                                .where((g) => g.isNotEmpty)
-                                .toList()
-                            : null;
-
-                        List<String>? actors = _actorsController.text.isNotEmpty
-                            ? _actorsController.text
-                                .split(',')
-                                .map((a) => a.trim())
-                                .where((a) => a.isNotEmpty)
-                                .toList()
-                            : null;
-
-                        final result = MatchResult(
-                          newName: newName,
-                          posterUrl: poster,
-                          coverBytes: _updatedCoverBytes ??
-                              widget.initialResult.coverBytes,
-                          title: _titleController.text,
-                          year: int.tryParse(_yearController.text),
-                          season: int.tryParse(_seasonController.text),
-                          episode: int.tryParse(_episodeController.text),
-                          episodeTitle: _episodeTitleController.text,
-                          type: _type,
-                          description: _descriptionController.text.isEmpty
-                              ? null
-                              : _descriptionController.text,
-                          genres: genres,
-                          director: _directorController.text.isEmpty
-                              ? null
-                              : _directorController.text,
-                          actors: actors,
-                          rating: double.tryParse(_ratingController.text),
-                          contentRating: _contentRatingController.text.isEmpty
-                              ? null
-                              : _contentRatingController.text,
-                          runtime: int.tryParse(_runtimeController.text),
-                          studio: widget.initialResult.studio,
-                          imdbId: widget.initialResult.imdbId,
-                          tmdbId: widget.initialResult.tmdbId,
-                          alternativePosterUrls:
-                              widget.initialResult.alternativePosterUrls,
-                          searchResults: widget.initialResult.searchResults,
-                        );
-
-                        // Save first, then rename with the result
-                        widget.onSave(result);
-                        if (widget.onRename != null) {
-                          await widget.onRename!(result);
-                        }
-                      } finally {
-                        if (mounted) {
-                          setState(() => _isProcessing = false);
-                        }
-                      }
-                    },
-            ),
-          ),
         ],
       ),
     );
@@ -844,24 +783,39 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
 
   Widget _buildTypeButton(String label, String value) {
     bool selected = _type == value;
+    IconData icon = value == 'movie' ? Icons.movie_outlined : Icons.tv_outlined;
+    Color accentColor = Theme.of(context).colorScheme.primary;
+
     return GestureDetector(
       onTap: () => setState(() => _type = value),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: selected
-              ? Theme.of(context).colorScheme.surface
-              : Colors.transparent,
+          color: selected ? accentColor.withOpacity(0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
+          border: selected ? Border.all(color: accentColor, width: 1.5) : null,
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-            color: selected
-                ? Theme.of(context).colorScheme.onSurface
-                : Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: selected
+                  ? accentColor
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                color: selected
+                    ? accentColor
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ),
       ),
     );

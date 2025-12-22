@@ -215,26 +215,12 @@ class _RenamerPageState extends State<RenamerPage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Clear All Button
-                _buildMinimalIconButton(
-                  context,
-                  icon: Icons.delete_outline,
-                  tooltip: 'Clear All',
-                  onPressed: () {
-                    setState(() => _expandedIndex = null);
-                    fileState.clearAll();
-                  },
-                  isDark: isDark,
-                  isDestructive: true,
-                ),
-
                 // Search All Button - only if there are files without metadata
                 if (hasFiles) ...[
-                  const SizedBox(width: 8),
                   _buildMinimalIconButton(
                     context,
-                    icon: Icons.cloud_sync_outlined,
-                    tooltip: 'Search All',
+                    icon: Icons.cloud_download_outlined,
+                    tooltip: 'Search All Metadata',
                     onPressed: () async {
                       // Check if API keys are configured
                       if (settings.metadataSource == 'tmdb' &&
@@ -296,27 +282,41 @@ class _RenamerPageState extends State<RenamerPage> {
                       }
                     },
                     isDark: isDark,
-                    accentColor: settings.accentColor,
+                    iconColor: settings.accentColor,
                   ),
+                  const SizedBox(width: 8),
                 ],
 
-                // Rename All Button - only if there are files to rename
+                // Apply All Button - only if there are files to apply
                 if (canRename) ...[
-                  const SizedBox(width: 8),
                   _buildMinimalIconButton(
                     context,
-                    icon: Icons.drive_file_rename_outline,
-                    tooltip: 'Rename All',
+                    icon: Icons.check,
+                    tooltip: 'Apply Metadata to All Files',
                     onPressed: () {
                       setState(() => _expandedIndex = null);
                       final settings = context.read<SettingsService>();
                       fileState.renameFiles(settings: settings);
                     },
                     isDark: isDark,
-                    isPrimary: true,
+                    isPrimary: false,
                     accentColor: settings.accentColor,
                   ),
+                  const SizedBox(width: 8),
                 ],
+
+                // Clear All Button
+                _buildMinimalIconButton(
+                  context,
+                  icon: Icons.close,
+                  tooltip: 'Clear All',
+                  onPressed: () {
+                    setState(() => _expandedIndex = null);
+                    fileState.clearAll();
+                  },
+                  isDark: isDark,
+                  isDestructive: false, // Make it grey instead of red
+                ),
               ],
             ),
           ),
@@ -425,6 +425,7 @@ class _RenamerPageState extends State<RenamerPage> {
     bool isPrimary = false,
     bool isDestructive = false,
     Color? accentColor,
+    Color? iconColor,
   }) {
     final Color buttonColor = isPrimary
         ? (accentColor ?? Theme.of(context).colorScheme.primary)
@@ -433,6 +434,9 @@ class _RenamerPageState extends State<RenamerPage> {
             : (isDark
                 ? AppColors.darkTextSecondary
                 : AppColors.lightTextSecondary));
+
+    final Color effectiveIconColor =
+        iconColor ?? (isPrimary ? Colors.white : buttonColor);
 
     final Color bgColor = isPrimary
         ? buttonColor
@@ -462,7 +466,7 @@ class _RenamerPageState extends State<RenamerPage> {
             child: Icon(
               icon,
               size: 20,
-              color: isPrimary ? Colors.white : buttonColor,
+              color: effectiveIconColor,
             ),
           ),
         ),
@@ -530,6 +534,7 @@ class _RenamerPageState extends State<RenamerPage> {
     FileStateService fileState,
   ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final settings = context.read<SettingsService>();
 
     return Card(
       elevation: isExpanded ? 2 : 0,
@@ -602,13 +607,10 @@ class _RenamerPageState extends State<RenamerPage> {
                               Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w600,
-                                    decoration: isRenamed
-                                        ? TextDecoration.lineThrough
-                                        : null,
                                     color: isRenamed
                                         ? (isDark
-                                            ? AppColors.darkTextSecondary
-                                            : AppColors.lightTextSecondary)
+                                            ? AppColors.darkTextTertiary
+                                            : AppColors.lightTextTertiary)
                                         : (isDark
                                             ? AppColors.darkTextPrimary
                                             : AppColors.lightTextPrimary),
@@ -722,15 +724,22 @@ class _RenamerPageState extends State<RenamerPage> {
                     ),
                   ),
 
-                  // Action Button (Search/Rename/Success indicator)
-                  _buildActionButton(
-                    context,
-                    index,
-                    isRenamed,
-                    output,
-                    fileState,
-                    isDark,
+                  // Search Button (cloud icon) - always available, resets status if already applied
+                  IconButton(
+                    icon: const Icon(Icons.cloud_download_outlined, size: 20),
+                    color: settings.accentColor,
+                    onPressed: () {
+                      if (isRenamed) {
+                        fileState.resetRenamedStatus(index);
+                      }
+                      _performSearch(context, index, input, fileState,
+                          context.read<SettingsService>());
+                    },
+                    tooltip: "Search online metadata",
                   ),
+
+                  // Apply Button (checkmark - shows spinner when processing, green when done)
+                  _buildApplyButton(context, index, isRenamed, fileState),
 
                   // Delete Button
                   IconButton(
@@ -759,12 +768,12 @@ class _RenamerPageState extends State<RenamerPage> {
                 fileState.updateManualMatch(index, newResult);
               },
               onCancel: () => _toggleExpanded(index),
+              onSearch: () {
+                final settings = context.read<SettingsService>();
+                _performSearch(context, index, input, fileState, settings);
+              },
               onRename: (MatchResult result) async {
-                // DEBUG: Show what the editor is passing
-                debugPrint('🔔 ONRENAME CALLED:');
-                debugPrint('   Title from editor: "${result.title}"');
-                debugPrint('   Year from editor: ${result.year}');
-                // Update the match result first
+                // Update the match result and apply to file
                 fileState.updateManualMatch(index, result);
                 // Then rename
                 final settings = context.read<SettingsService>();
@@ -806,18 +815,14 @@ class _RenamerPageState extends State<RenamerPage> {
     }
   }
 
-  /// Builds the action button (search/rename/success indicator)
-  /// Shows green checkmark when renamed, spinner when processing,
-  /// done icon when ready to rename, or cloud icon to search
-  Widget _buildActionButton(
+  /// Builds the apply button (checkmark icon)
+  /// Shows spinner when processing, green checkmark when done
+  Widget _buildApplyButton(
     BuildContext context,
     int index,
     bool isRenamed,
-    MatchResult? output,
     FileStateService fileState,
-    bool isDark,
   ) {
-    final MediaRecord input = fileState.inputFiles[index];
     final settings = context.read<SettingsService>();
 
     // Show green checkmark when successfully renamed
@@ -825,99 +830,62 @@ class _RenamerPageState extends State<RenamerPage> {
       return IconButton(
         icon: const Icon(Icons.check_circle, size: 20),
         color: AppColors.lightSuccess,
-        onPressed: null, // Disabled when already renamed
-        tooltip: "Renamed successfully",
+        onPressed: null,
+        tooltip: "Applied successfully",
       );
     }
 
     // Show spinner when processing
     if (_renamingIndices.contains(index)) {
-      return IconButton(
-        icon: SizedBox(
-          width: 20,
-          height: 20,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(
-              Theme.of(context).colorScheme.secondary,
+      return SizedBox(
+        width: 40,
+        height: 40,
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                Theme.of(context).colorScheme.primary,
+              ),
             ),
           ),
         ),
-        onPressed: null,
-        tooltip: "Processing...",
       );
     }
 
-    // Determine icon and color based on search state
-    final bool isSearched = _searchedIndices.contains(index);
-    final IconData icon =
-        isSearched ? Icons.done : Icons.cloud_download_outlined;
-    final Color color = isSearched
-        ? Theme.of(context).colorScheme.secondary
-        : Theme.of(context).colorScheme.primary;
-    final String tooltip = isSearched
-        ? "Metadata found - Click to rename"
-        : "Search online metadata";
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final Color iconColor =
+        isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary;
 
+    // Show checkmark to apply
     return IconButton(
-      icon: Icon(icon, size: 20),
-      color: color,
-      onPressed: () => _handleActionButtonPress(
-        context,
-        index,
-        isSearched,
-        input,
-        fileState,
-        settings,
-      ),
-      tooltip: tooltip,
+      icon: const Icon(Icons.check, size: 20),
+      color: iconColor,
+      onPressed: () async {
+        setState(() => _renamingIndices.add(index));
+
+        final success =
+            await fileState.renameSingleFile(index, settings: settings);
+
+        if (!context.mounted) return;
+
+        setState(() {
+          _renamingIndices.remove(index);
+          if (success) {
+            _searchedIndices.remove(index);
+          }
+        });
+
+        if (success) {
+          SnackbarHelper.showSuccess(context, 'Applied successfully!');
+        } else {
+          SnackbarHelper.showError(context, 'Failed to apply.');
+        }
+      },
+      tooltip: "Apply metadata to file",
     );
-  }
-
-  /// Handles action button press - either searches or renames
-  Future<void> _handleActionButtonPress(
-    BuildContext context,
-    int index,
-    bool isSearched,
-    MediaRecord input,
-    FileStateService fileState,
-    SettingsService settings,
-  ) async {
-    // If metadata already found, rename the file
-    if (isSearched) {
-      await _performRename(context, index, fileState, settings);
-      return;
-    }
-
-    // Otherwise, search for metadata
-    await _performSearch(context, index, input, fileState, settings);
-  }
-
-  /// Performs the rename operation for a single file
-  Future<void> _performRename(
-    BuildContext context,
-    int index,
-    FileStateService fileState,
-    SettingsService settings,
-  ) async {
-    setState(() => _renamingIndices.add(index));
-
-    final success = await fileState.renameSingleFile(index, settings: settings);
-
-    if (!context.mounted) return;
-
-    setState(() {
-      _renamingIndices.remove(index);
-      if (success) {
-        _searchedIndices.remove(index);
-      }
-    });
-
-    if (success) {
-      SnackbarHelper.showSuccess(context, 'File renamed successfully!');
-    } else {
-      SnackbarHelper.showError(context, 'Failed to rename file.');
-    }
   }
 
   /// Performs metadata search for a single file

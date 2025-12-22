@@ -46,6 +46,14 @@ class FileStateService with ChangeNotifier {
     }
   }
 
+  // Reset renamed status so user can re-apply metadata
+  void resetRenamedStatus(int index) {
+    if (index >= 0 && index < _inputFiles.length) {
+      _inputFiles[index].renamedPath = null;
+      notifyListeners();
+    }
+  }
+
   Future<void> matchFiles(SettingsService settings) async {
     if (_inputFiles.isEmpty) return;
 
