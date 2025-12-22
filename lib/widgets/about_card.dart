@@ -32,6 +32,10 @@ class AboutCard extends StatelessWidget {
     final settings = context.watch<SettingsService>();
     final accentColor = settings.accentColor;
 
+    // Use lifetime statistics from settings
+    final int tvShowCount = settings.lifetimeTvShowsMatched;
+    final int movieCount = settings.lifetimeMoviesMatched;
+
     return FutureBuilder<PackageInfo>(
       future: PackageInfo.fromPlatform(),
       builder: (context, snapshot) {
@@ -95,75 +99,186 @@ class AboutCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: AppSpacing.lg),
-                Row(
-                  children: [
-                    // Message text
-                    Expanded(
-                      child: Row(
-                        children: [
-                          Text(
-                            'Made with ',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                  color: isDark
-                                      ? AppColors.darkTextPrimary
-                                      : AppColors.lightTextPrimary,
-                                ),
-                          ),
-                          Icon(
-                            Icons.favorite,
-                            size: 16,
-                            color: accentColor,
-                          ),
-                          Text(
-                            ' for you to enjoy. Please consider supporting the development.',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                  color: isDark
-                                      ? AppColors.darkTextPrimary
-                                      : AppColors.lightTextPrimary,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
+                const SizedBox(height: AppSpacing.md),
 
-                    // Support Button (accent color)
-                    ElevatedButton(
-                      onPressed: () => _openPayPal(context),
-                      child: const Text(
-                        'Support',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
+                // Full-width Stats Section - Horizontal layout
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.lg,
+                    vertical: AppSpacing.md,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        accentColor.withOpacity(0.08),
+                        accentColor.withOpacity(0.03),
+                      ],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: accentColor.withOpacity(0.25),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      // TV Shows Stat
+                      Expanded(
+                        child: _buildCompactStatItem(
+                          context,
+                          icon: Icons.tv_rounded,
+                          count: tvShowCount,
+                          label: 'TV Shows Matched',
+                          accentColor: accentColor,
+                          isDark: isDark,
                         ),
                       ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: accentColor,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
+
+                      // Vertical Divider
+                      Container(
+                        height: 40,
+                        width: 1,
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              accentColor.withOpacity(0.0),
+                              accentColor.withOpacity(0.3),
+                              accentColor.withOpacity(0.0),
+                            ],
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                          ),
                         ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+                      ),
+
+                      // Movies Stat
+                      Expanded(
+                        child: _buildCompactStatItem(
+                          context,
+                          icon: Icons.movie_rounded,
+                          count: movieCount,
+                          label: 'Movies Matched',
+                          accentColor: accentColor,
+                          isDark: isDark,
                         ),
-                        elevation: 2,
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: AppSpacing.lg),
+
+                // Centered "Made With..." message
+                Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Made with ',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: isDark
+                                  ? AppColors.darkTextPrimary
+                                  : AppColors.lightTextPrimary,
+                            ),
+                      ),
+                      Icon(
+                        Icons.favorite,
+                        size: 16,
+                        color: accentColor,
+                      ),
+                      Text(
+                        ' for you to enjoy. Please consider supporting the development.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: isDark
+                                  ? AppColors.darkTextPrimary
+                                  : AppColors.lightTextPrimary,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+
+                // Support Button - Centered
+                Center(
+                  child: ElevatedButton(
+                    onPressed: () => _openPayPal(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accentColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      elevation: 2,
+                    ),
+                    child: const Text(
+                      'Support',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ],
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildCompactStatItem(
+    BuildContext context, {
+    required IconData icon,
+    required int count,
+    required String label,
+    required Color accentColor,
+    required bool isDark,
+  }) {
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 24,
+            color: accentColor,
+          ),
+          const SizedBox(width: 12),
+          Text(
+            count.toString(),
+            style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: accentColor,
+                  fontSize: 28,
+                  height: 1.0,
+                ),
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: isDark
+                        ? AppColors.darkTextSecondary
+                        : AppColors.lightTextSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

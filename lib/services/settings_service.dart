@@ -14,14 +14,18 @@ class SettingsService with ChangeNotifier {
   String _tmdbApiKey = "";
   String _omdbApiKey = "";
   String _metadataSource = "tmdb";
-  Color _accentColor = const Color(0xFF6366F1); // Indigo default
+  Color _accentColor = const Color(0xFFEC4899); // Pink default
   String _ffmpegPath = ""; // Stores the folder path
   String _mkvpropeditPath = "";
   String _atomicparsleyPath = "";
 
+  // Lifetime Statistics
+  int _lifetimeTvShowsMatched = 0;
+  int _lifetimeMoviesMatched = 0;
+
   // Configurable Download URLs
   String _ffmpegUrl =
-      'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
+      'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip';
   String _mkvtoolnixUrl =
       'https://mkvtoolnix.download/windows/releases/96.0/mkvtoolnix-64-bit-96.0.7z';
   String _atomicParsleyUrl =
@@ -54,6 +58,9 @@ class SettingsService with ChangeNotifier {
   bool get isMkvpropeditAvailable => _isMkvpropeditAvailable;
   bool get isAtomicParsleyAvailable => _isAtomicParsleyAvailable;
   bool get isCheckingTools => _isCheckingTools;
+
+  int get lifetimeTvShowsMatched => _lifetimeTvShowsMatched;
+  int get lifetimeMoviesMatched => _lifetimeMoviesMatched;
 
   /// Get the portable UserData folder path (next to executable)
   Future<String> _getUserDataPath() async {
@@ -129,6 +136,10 @@ class SettingsService with ChangeNotifier {
       _mkvtoolnixUrl = data['mkvtoolnix_url'] ?? _mkvtoolnixUrl;
       _atomicParsleyUrl = data['atomicparsley_url'] ?? _atomicParsleyUrl;
 
+      // Lifetime Statistics
+      _lifetimeTvShowsMatched = data['lifetime_tv_shows_matched'] ?? 0;
+      _lifetimeMoviesMatched = data['lifetime_movies_matched'] ?? 0;
+
       await checkToolAvailability();
       notifyListeners();
       debugPrint('✅ Settings loaded from UserData folder');
@@ -158,6 +169,8 @@ class SettingsService with ChangeNotifier {
         'ffmpeg_url': _ffmpegUrl,
         'mkvtoolnix_url': _mkvtoolnixUrl,
         'atomicparsley_url': _atomicParsleyUrl,
+        'lifetime_tv_shows_matched': _lifetimeTvShowsMatched,
+        'lifetime_movies_matched': _lifetimeMoviesMatched,
       };
 
       const jsonEncoder = JsonEncoder.withIndent('  ');
@@ -281,12 +294,12 @@ class SettingsService with ChangeNotifier {
     _tmdbApiKey = "";
     _omdbApiKey = "";
     _metadataSource = "tmdb";
-    _accentColor = const Color(0xFF6366F1);
+    _accentColor = const Color(0xFFEC4899); // Pink default
     _ffmpegPath = "";
     _mkvpropeditPath = "";
     _atomicparsleyPath = "";
     _ffmpegUrl =
-        'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
+        'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip';
     _mkvtoolnixUrl =
         'https://mkvtoolnix.download/windows/releases/96.0/mkvtoolnix-64-bit-96.0.7z';
     _atomicParsleyUrl =
@@ -463,5 +476,19 @@ class SettingsService with ChangeNotifier {
     } catch (_) {}
 
     return false;
+  }
+
+  /// Increment lifetime TV show match count
+  Future<void> incrementTvShowMatches(int count) async {
+    _lifetimeTvShowsMatched += count;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  /// Increment lifetime movie match count
+  Future<void> incrementMovieMatches(int count) async {
+    _lifetimeMoviesMatched += count;
+    await _saveSettings();
+    notifyListeners();
   }
 }

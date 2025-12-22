@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'media_record.dart';
 import 'match_result.dart';
@@ -99,7 +99,7 @@ class CoreBackend {
                     episodeTitle = lookup[key];
                   }
                 } catch (e) {
-                  print("Episode lookup error TMDB: $e");
+                  debugPrint("Episode lookup error TMDB: $e");
                 }
               }
 
@@ -109,7 +109,7 @@ class CoreBackend {
                 try {
                   alternativePosters = await tmdb.getTVPosters(tvId);
                 } catch (e) {
-                  print("Error fetching alternative posters: $e");
+                  debugPrint("Error fetching alternative posters: $e");
                 }
               }
 
@@ -144,7 +144,7 @@ class CoreBackend {
                   ));
                 }
               } catch (e) {
-                print("Error fetching search results: $e");
+                debugPrint("Error fetching search results: $e");
               }
 
               var context = {
@@ -176,7 +176,7 @@ class CoreBackend {
               continue; // Skip to next record
             }
           } catch (e) {
-            print("TMDB Search Error: $e");
+            debugPrint("TMDB Search Error: $e");
           }
         } else if (omdb != null && record.title != null) {
           // OMDb Logic
@@ -224,7 +224,7 @@ class CoreBackend {
                     episodeTitle = lookup[key];
                   }
                 } catch (e) {
-                  print("Episode lookup error OMDB: $e");
+                  debugPrint("Episode lookup error OMDB: $e");
                 }
               }
 
@@ -260,7 +260,7 @@ class CoreBackend {
                   ));
                 }
               } catch (e) {
-                print("Error fetching search results: $e");
+                debugPrint("Error fetching search results: $e");
               }
 
               var context = {
@@ -291,7 +291,7 @@ class CoreBackend {
               continue; // Skip to next record
             }
           } catch (e) {
-            print("OMDb Search Error: $e");
+            debugPrint("OMDb Search Error: $e");
           }
         }
 
@@ -367,7 +367,7 @@ class CoreBackend {
                 try {
                   alternativePosters = await tmdb.getMoviePosters(movieId);
                 } catch (e) {
-                  print("Error fetching alternative posters: $e");
+                  debugPrint("Error fetching alternative posters: $e");
                 }
               }
 
@@ -403,7 +403,7 @@ class CoreBackend {
                   ));
                 }
               } catch (e) {
-                print("Error fetching search results: $e");
+                debugPrint("Error fetching search results: $e");
               }
 
               var context = {"movie_name": movieName, "year": year};
@@ -427,7 +427,7 @@ class CoreBackend {
               continue; // Skip to next record
             }
           } catch (e) {
-            print("TMDB Movie Search Error: $e");
+            debugPrint("TMDB Movie Search Error: $e");
           }
         } else if (omdb != null && record.title != null) {
           // OMDb Logic
@@ -502,7 +502,7 @@ class CoreBackend {
                   ));
                 }
               } catch (e) {
-                print("Error fetching search results: $e");
+                debugPrint("Error fetching search results: $e");
               }
 
               var context = {"movie_name": movieName, "year": year};
@@ -525,7 +525,7 @@ class CoreBackend {
               continue; // Skip to next record
             }
           } catch (e) {
-            print("OMDb Movie Search Error: $e");
+            debugPrint("OMDb Movie Search Error: $e");
           }
         }
 
@@ -578,7 +578,7 @@ class CoreBackend {
           if (result.exitCode == 0) {
             _ffmpegPath = binPath;
             _ffmpegAvailable = true;
-            print('✅ Using custom FFmpeg: $binPath');
+            debugPrint('✅ Using custom FFmpeg: $binPath');
             return true;
           }
         }
@@ -590,7 +590,7 @@ class CoreBackend {
           if (result.exitCode == 0) {
             _ffmpegPath = directPath;
             _ffmpegAvailable = true;
-            print('✅ Using custom FFmpeg: $directPath');
+            debugPrint('✅ Using custom FFmpeg: $directPath');
             return true;
           }
         }
@@ -610,7 +610,7 @@ class CoreBackend {
         if (result.exitCode == 0) {
           _ffmpegPath = bundledFfmpeg;
           _ffmpegAvailable = true;
-          print('✅ Using bundled FFmpeg: $bundledFfmpeg');
+          debugPrint('✅ Using bundled FFmpeg: $bundledFfmpeg');
           return true;
         }
       }
@@ -624,7 +624,7 @@ class CoreBackend {
       _ffmpegAvailable = result.exitCode == 0;
       _ffmpegPath = 'ffmpeg'; // Use from PATH
       if (_ffmpegAvailable!) {
-        print('✅ Using FFmpeg from PATH');
+        debugPrint('✅ Using FFmpeg from PATH');
       }
       return _ffmpegAvailable!;
     } catch (e) {
@@ -658,7 +658,7 @@ class CoreBackend {
       final userDataTool =
           p.join(exeDir, 'UserData', 'tools', userDataSubDir, '$toolName.exe');
       if (File(userDataTool).existsSync()) {
-        print('✅ Using UserData $toolName: $userDataTool');
+        debugPrint('✅ Using UserData $toolName: $userDataTool');
         return userDataTool;
       }
     } catch (e) {
@@ -670,14 +670,14 @@ class CoreBackend {
       // Try bin/ subdirectory first (like FFmpeg structure)
       final binPath = p.join(customPath, 'bin', '$toolName.exe');
       if (File(binPath).existsSync()) {
-        print('✅ Using custom $toolName: $binPath');
+        debugPrint('✅ Using custom $toolName: $binPath');
         return binPath;
       }
 
       // Try direct path in folder
       final directPath = p.join(customPath, '$toolName.exe');
       if (File(directPath).existsSync()) {
-        print('✅ Using custom $toolName: $directPath');
+        debugPrint('✅ Using custom $toolName: $directPath');
         return directPath;
       }
     }
@@ -689,7 +689,7 @@ class CoreBackend {
       final bundledTool = p.join(exeDir, '$toolName.exe');
 
       if (File(bundledTool).existsSync()) {
-        print('✅ Using bundled $toolName: $bundledTool');
+        debugPrint('✅ Using bundled $toolName: $bundledTool');
         return bundledTool;
       }
     } catch (e) {
@@ -726,21 +726,21 @@ class CoreBackend {
   /// Read existing metadata from a media file using FFprobe
   static Future<MatchResult?> readMetadata(String filePath,
       {SettingsService? settings}) async {
-    print("\n" + "=" * 60);
-    print("📖 READING METADATA: ${p.basename(filePath)}");
-    print("=" * 60);
+    debugPrint("\n" + "=" * 60);
+    debugPrint("📖 READING METADATA: ${p.basename(filePath)}");
+    debugPrint("=" * 60);
 
     // Validate input file
     if (!File(filePath).existsSync()) {
-      print("❌ File doesn't exist: $filePath");
-      print("=" * 60 + "\n");
+      debugPrint("❌ File doesn't exist: $filePath");
+      debugPrint("=" * 60 + "\n");
       return null;
     }
 
     String ext = p.extension(filePath).toLowerCase();
     if (ext != '.mp4' && ext != '.mkv') {
-      print("⚠️  Unsupported format (only .mp4 and .mkv supported)");
-      print("=" * 60 + "\n");
+      debugPrint("⚠️  Unsupported format (only .mp4 and .mkv supported)");
+      debugPrint("=" * 60 + "\n");
       return null;
     }
 
@@ -753,16 +753,16 @@ class CoreBackend {
       final binPath = p.join(settings.ffmpegPath, 'bin', 'ffprobe.exe');
       if (File(binPath).existsSync()) {
         ffprobePath = binPath;
-        print('✅ Using custom FFprobe: $ffprobePath');
+        debugPrint('✅ Using custom FFprobe: $ffprobePath');
       } else {
         // Try without bin/ subdirectory (in case user pointed directly to bin folder)
         final directPath = p.join(settings.ffmpegPath, 'ffprobe.exe');
         if (File(directPath).existsSync()) {
           ffprobePath = directPath;
-          print('✅ Using custom FFprobe: $ffprobePath');
+          debugPrint('✅ Using custom FFprobe: $ffprobePath');
         } else {
-          print('⚠️  FFprobe not found in: ${settings.ffmpegPath}');
-          print('    Expected: $binPath or $directPath');
+          debugPrint('⚠️  FFprobe not found in: ${settings.ffmpegPath}');
+          debugPrint('    Expected: $binPath or $directPath');
         }
       }
     }
@@ -776,24 +776,24 @@ class CoreBackend {
 
         if (File(bundledFfprobe).existsSync()) {
           ffprobePath = bundledFfprobe;
-          print('✅ Using bundled FFprobe: $bundledFfprobe');
+          debugPrint('✅ Using bundled FFprobe: $bundledFfprobe');
         }
       } catch (e) {
-        print('⚠️  Could not locate bundled FFprobe: $e');
+        debugPrint('⚠️  Could not locate bundled FFprobe: $e');
       }
     }
 
     // 3. If still not found, just try "ffprobe" (assume it's in PATH)
     if (ffprobePath == null) {
       ffprobePath = 'ffprobe';
-      print(
+      debugPrint(
           '⚠️  FFprobe not found in custom/bundled paths, trying system PATH...');
     }
 
     // Run FFprobe to get metadata
     try {
       var result = await Process.run(
-        ffprobePath!, // Already checked for null above
+        ffprobePath, // Already checked for null above
         [
           '-v',
           'quiet',
@@ -807,8 +807,8 @@ class CoreBackend {
       );
 
       if (result.exitCode != 0) {
-        print("❌ FFprobe failed (exit ${result.exitCode})");
-        print("=" * 60 + "\n");
+        debugPrint("❌ FFprobe failed (exit ${result.exitCode})");
+        debugPrint("=" * 60 + "\n");
         return null;
       }
 
@@ -817,19 +817,19 @@ class CoreBackend {
       final format = jsonData['format'];
 
       if (format == null || format['tags'] == null) {
-        print("ℹ️  No metadata tags found");
-        print("=" * 60 + "\n");
+        debugPrint("ℹ️  No metadata tags found");
+        debugPrint("=" * 60 + "\n");
         return null;
       }
 
       final tags = format['tags'];
 
       // DEBUG: Print ALL tags found
-      print("🔍 ALL TAGS FOUND:");
+      debugPrint("🔍 ALL TAGS FOUND:");
       tags.forEach((key, value) {
-        print("   $key: $value");
+        debugPrint("   $key: $value");
       });
-      print("");
+      debugPrint("");
 
       // Extract metadata - check multiple variations
       String? title = tags['title'] ?? tags['TITLE'];
@@ -908,37 +908,72 @@ class CoreBackend {
           tags['subtitle'] ??
           tags['SUBTITLE'];
 
-      // Also check filename for S##E## pattern if tags don't have season/episode
-      if (season == null || episode == null) {
-        String filename = p.basenameWithoutExtension(filePath);
-        // Match patterns like S01E02, s1e5, S01E02, etc.
-        RegExpMatch? match =
-            RegExp(r'[Ss](\d{1,2})[Ee](\d{1,2})').firstMatch(filename);
-        if (match != null) {
-          season ??= int.tryParse(match.group(1)!);
-          episode ??= int.tryParse(match.group(2)!);
+      // SMART PARSING: Check if TITLE contains episode pattern (S##E##)
+      // This prevents duplication when TITLE is already formatted
+      if (title != null && title.contains(RegExp(r'[Ss]\d{1,2}[Ee]\d{1,2}'))) {
+        debugPrint("🧠 Smart parsing: TITLE contains episode pattern");
 
-          // Also try to extract episode title (text after S##E## - <title>)
-          if (episodeTitle == null) {
-            int afterPattern = match.end;
-            String after = filename.substring(afterPattern).trim();
-            // Remove leading separators like " - " or "."
+        // Extract from TITLE instead of filename
+        RegExpMatch? titleMatch =
+            RegExp(r'[Ss](\d{1,2})[Ee](\d{1,2})').firstMatch(title);
+
+        if (titleMatch != null) {
+          // Parse season/episode if not already in tags
+          season ??= int.tryParse(titleMatch.group(1)!);
+          episode ??= int.tryParse(titleMatch.group(2)!);
+
+          // Extract show name (text before S##E##)
+          if (show == null || show.isEmpty) {
+            String before = title.substring(0, titleMatch.start).trim();
+            before = before.replaceFirst(RegExp(r'[\s\-\.]+$'), '');
+            if (before.isNotEmpty) {
+              show = before;
+            }
+          }
+
+          // Extract episode title (text after S##E##)
+          if (episodeTitle == null || episodeTitle.isEmpty) {
+            int afterPattern = titleMatch.end;
+            String after = title.substring(afterPattern).trim();
             after = after.replaceFirst(RegExp(r'^[\s\-\.]+'), '');
             if (after.isNotEmpty) {
               episodeTitle = after;
             }
           }
 
-          // Extract show name (text before S##E##)
-          if (show == null || show.isEmpty) {
-            String before = filename.substring(0, match.start).trim();
-            // Remove trailing separators
-            before = before.replaceFirst(RegExp(r'[\s\-\.]+$'), '');
-            if (before.isNotEmpty) {
-              show = before;
-              // If title wasn't set, use show name
-              if (title == null || title.isEmpty) {
-                title = show;
+          // For 'title' field, use the show name for TV episodes
+          title = show;
+        }
+      } else {
+        // Standard parsing: Check filename for S##E## pattern if tags don't have season/episode
+        if (season == null || episode == null) {
+          String filename = p.basenameWithoutExtension(filePath);
+          RegExpMatch? match =
+              RegExp(r'[Ss](\d{1,2})[Ee](\d{1,2})').firstMatch(filename);
+          if (match != null) {
+            season ??= int.tryParse(match.group(1)!);
+            episode ??= int.tryParse(match.group(2)!);
+
+            // Extract episode title from filename
+            if (episodeTitle == null) {
+              int afterPattern = match.end;
+              String after = filename.substring(afterPattern).trim();
+              after = after.replaceFirst(RegExp(r'^[\s\-\.]+'), '');
+              if (after.isNotEmpty) {
+                episodeTitle = after;
+              }
+            }
+
+            // Extract show name from filename
+            if (show == null || show.isEmpty) {
+              String before = filename.substring(0, match.start).trim();
+              before = before.replaceFirst(RegExp(r'[\s\-\.]+$'), '');
+              if (before.isNotEmpty) {
+                show = before;
+                // For TV episodes, title should be the show name
+                if (title == null || title.isEmpty) {
+                  title = show;
+                }
               }
             }
           }
@@ -948,17 +983,17 @@ class CoreBackend {
       // Determine type
       String type = (season != null && episode != null) ? 'episode' : 'movie';
 
-      print("📊 Found metadata:");
-      print("   Title: ${title ?? 'N/A'}");
-      print("   Year: ${year ?? 'N/A'}");
-      print("   Type: $type");
+      debugPrint("📊 Found metadata:");
+      debugPrint("   Title: ${title ?? 'N/A'}");
+      debugPrint("   Year: ${year ?? 'N/A'}");
+      debugPrint("   Type: $type");
       if (type == 'episode') {
-        print("   Show: ${show ?? 'N/A'}");
-        print("   Season: ${season ?? 'N/A'}");
-        print("   Episode: ${episode ?? 'N/A'}");
-        print("   Episode Title: ${episodeTitle ?? 'N/A'}");
+        debugPrint("   Show: ${show ?? 'N/A'}");
+        debugPrint("   Season: ${season ?? 'N/A'}");
+        debugPrint("   Episode: ${episode ?? 'N/A'}");
+        debugPrint("   Episode Title: ${episodeTitle ?? 'N/A'}");
       }
-      print("=" * 60 + "\n");
+      debugPrint("=" * 60 + "\n");
 
       // Generate newName using user format settings (if provided)
       String newName;
@@ -990,8 +1025,8 @@ class CoreBackend {
         newName = createFormattedTitle(formatTemplate, context) + ext;
       }
 
-      print("📝 Generated newName: $newName");
-      print("=" * 60 + "\n");
+      debugPrint("📝 Generated newName: $newName");
+      debugPrint("=" * 60 + "\n");
 
       // Note: Cover extraction is skipped during initial file import for speed
       // Covers will be extracted later when needed (during rename/embed operations)
@@ -1015,8 +1050,8 @@ class CoreBackend {
         coverBytes: coverBytes, // Include extracted cover art as bytes
       );
     } catch (e) {
-      print("❌ Error reading metadata: $e");
-      print("=" * 60 + "\n");
+      debugPrint("❌ Error reading metadata: $e");
+      debugPrint("=" * 60 + "\n");
       return null;
     }
   }
@@ -1027,12 +1062,12 @@ class CoreBackend {
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
         File(savePath).writeAsBytesSync(response.bodyBytes);
-        print('✅ Cover downloaded: $savePath');
+        debugPrint('✅ Cover downloaded: $savePath');
       } else {
-        print('❌ Failed to download cover: HTTP ${response.statusCode}');
+        debugPrint('❌ Failed to download cover: HTTP ${response.statusCode}');
       }
     } catch (e) {
-      print('❌ Error downloading cover: $e');
+      debugPrint('❌ Error downloading cover: $e');
     }
   }
 
@@ -1132,7 +1167,7 @@ class CoreBackend {
         extractedFile.renameSync(coverPath);
         if (File(coverPath).existsSync() &&
             File(coverPath).lengthSync() > 5000) {
-          print('✅ Extracted cover via attachment: $coverPath');
+          debugPrint('✅ Extracted cover via attachment: $coverPath');
           return coverPath;
         }
       }
@@ -1155,15 +1190,15 @@ class CoreBackend {
         final fileSize = File(coverPath).lengthSync();
         if (fileSize > 5000) {
           // At least 5KB to ensure it's a real image
-          print('✅ Extracted cover via video frame: $coverPath');
+          debugPrint('✅ Extracted cover via video frame: $coverPath');
           return coverPath;
         } else {
-          print(
+          debugPrint(
               '⚠️  Extracted file too small ($fileSize bytes), probably empty');
         }
       }
     } catch (e) {
-      print('❌ Error extracting cover: $e');
+      debugPrint('❌ Error extracting cover: $e');
     }
 
     return null;
@@ -1175,11 +1210,11 @@ class CoreBackend {
       {SettingsService? settings}) async {
     String? toolPath = await _resolveMkvpropedit(settings: settings);
     if (toolPath == null) {
-      print('mkvpropedit not available');
+      debugPrint('mkvpropedit not available');
       return false;
     }
     if (!File(filePath).existsSync()) {
-      print('MKV file not found');
+      debugPrint('MKV file not found');
       return false;
     }
 
@@ -1206,7 +1241,7 @@ class CoreBackend {
         // Delete existing covers if any found
         if (deleteArgs.length > 1) {
           await Process.run(toolPath, deleteArgs, runInShell: false);
-          print('Removed ${(deleteArgs.length - 1) ~/ 2} old cover(s)');
+          debugPrint('Removed ${(deleteArgs.length - 1) ~/ 2} old cover(s)');
         }
 
         // Now add the new cover
@@ -1223,10 +1258,10 @@ class CoreBackend {
             ],
             runInShell: false);
         if (result.exitCode == 0) {
-          print('Cover attached');
+          debugPrint('Cover attached');
           hasAttachment = true;
         } else {
-          print('Cover failed: ${result.stderr}');
+          debugPrint('Cover failed: ${result.stderr}');
         }
       }
 
@@ -1276,7 +1311,7 @@ class CoreBackend {
         String xmlPath = p.join(
             cacheDir, 'tags_${DateTime.now().millisecondsSinceEpoch}.xml');
         await File(xmlPath).writeAsString(xml.toString());
-        print('Writing $tagCount tags (in-place)...');
+        debugPrint('Writing $tagCount tags (in-place)...');
         var result = await Process.run(
             toolPath, [filePath, '--tags', 'all:$xmlPath'],
             runInShell: false);
@@ -1284,20 +1319,20 @@ class CoreBackend {
           await File(xmlPath).delete();
         } catch (e) {}
         if (result.exitCode == 0) {
-          print('$tagCount tags written');
+          debugPrint('$tagCount tags written');
           hasTags = true;
         } else {
-          print('Tags failed: ${result.stderr}');
+          debugPrint('Tags failed: ${result.stderr}');
         }
       }
 
       if (hasAttachment || hasTags) {
-        print('MKV complete (fast in-place)');
+        debugPrint('MKV complete (fast in-place)');
         return true;
       }
       return true;
     } catch (e) {
-      print('Error: $e');
+      debugPrint('Error: $e');
       return false;
     }
   }
@@ -1308,7 +1343,7 @@ class CoreBackend {
       {SettingsService? settings}) async {
     String? toolPath = await _resolveAtomicParsley(settings: settings);
     if (toolPath == null) {
-      print('⚠️  AtomicParsley not available');
+      debugPrint('⚠️  AtomicParsley not available');
       return false;
     }
 
@@ -1355,37 +1390,37 @@ class CoreBackend {
     args.add('--overWrite');
 
     // DEBUG: Log exact command and arguments
-    print('🔧 ATOMICPARSLEY COMMAND:');
-    print('   Tool: $toolPath');
-    print('   File: $filePath');
-    print('   Args: ${args.join(' | ')}');
-    print('   Full: "$toolPath" ${args.map((a) => '"$a"').join(' ')}');
+    debugPrint('🔧 ATOMICPARSLEY COMMAND:');
+    debugPrint('   Tool: $toolPath');
+    debugPrint('   File: $filePath');
+    debugPrint('   Args: ${args.join(' | ')}');
+    debugPrint('   Full: "$toolPath" ${args.map((a) => '"$a"').join(' ')}');
 
     // Check file before
     File targetFile = File(filePath);
     DateTime beforeTime = targetFile.lastModifiedSync();
     int beforeSize = targetFile.lengthSync();
-    print(
+    debugPrint(
         '📊 BEFORE: Modified=${beforeTime.toIso8601String()}, Size=$beforeSize');
 
     try {
       // Use runInShell: false to avoid path quoting issues with spaces
       var result = await Process.run(toolPath, args, runInShell: false);
 
-      print('📤 Exit Code: ${result.exitCode}');
+      debugPrint('📤 Exit Code: ${result.exitCode}');
 
       // ALWAYS log stdout and stderr
       String stdout = result.stdout.toString().trim();
       String stderr = result.stderr.toString().trim();
 
       if (stdout.isNotEmpty) {
-        print('📄 STDOUT:');
-        print(stdout);
+        debugPrint('📄 STDOUT:');
+        debugPrint(stdout);
       }
 
       if (stderr.isNotEmpty) {
-        print('⚠️  STDERR:');
-        print(stderr);
+        debugPrint('⚠️  STDERR:');
+        debugPrint(stderr);
       }
 
       // Wait for file system to sync
@@ -1395,31 +1430,32 @@ class CoreBackend {
       if (targetFile.existsSync()) {
         DateTime afterTime = targetFile.lastModifiedSync();
         int afterSize = targetFile.lengthSync();
-        print(
+        debugPrint(
             '📊 AFTER: Modified=${afterTime.toIso8601String()}, Size=$afterSize');
 
         bool timeChanged = afterTime.isAfter(beforeTime);
         bool sizeChanged = afterSize != beforeSize;
 
-        print('   Time changed: $timeChanged');
-        print('   Size changed: $sizeChanged');
+        debugPrint('   Time changed: $timeChanged');
+        debugPrint('   Size changed: $sizeChanged');
 
         if (!timeChanged && !sizeChanged) {
-          print('❌ FILE NOT MODIFIED - AtomicParsley did NOT write metadata!');
-          print('   This means the command failed silently');
+          debugPrint(
+              '❌ FILE NOT MODIFIED - AtomicParsley did NOT write metadata!');
+          debugPrint('   This means the command failed silently');
           return false;
         }
       }
 
       if (result.exitCode == 0) {
-        print('✅ MP4 metadata embedded with AtomicParsley');
+        debugPrint('✅ MP4 metadata embedded with AtomicParsley');
         return true;
       } else {
-        print('❌ AtomicParsley failed (exit ${result.exitCode})');
+        debugPrint('❌ AtomicParsley failed (exit ${result.exitCode})');
         return false;
       }
     } catch (e) {
-      print('❌ Error running AtomicParsley: $e');
+      debugPrint('❌ Error running AtomicParsley: $e');
       return false;
     }
   }
@@ -1428,27 +1464,27 @@ class CoreBackend {
   static Future<void> embedMetadata(
       String filePath, String? coverPath, MatchResult metadata,
       {SettingsService? settings}) async {
-    print("\n" + "=" * 60);
-    print("🎬 EMBEDDING: ${p.basename(filePath)}");
-    print("=" * 60);
+    debugPrint("\n" + "=" * 60);
+    debugPrint("🎬 EMBEDDING: ${p.basename(filePath)}");
+    debugPrint("=" * 60);
 
     // Validate input file
     if (!File(filePath).existsSync()) {
-      print("❌ Input file doesn't exist: $filePath");
-      print("=" * 60 + "\n");
+      debugPrint("❌ Input file doesn't exist: $filePath");
+      debugPrint("=" * 60 + "\n");
       return;
     }
 
     String ext = p.extension(filePath).toLowerCase();
     bool hasCover = coverPath != null && File(coverPath).existsSync();
 
-    print("📁 Extension: $ext");
-    print("🖼️  Cover: ${hasCover ? '✅ ' + coverPath : '❌ None'}");
+    debugPrint("📁 Extension: $ext");
+    debugPrint("🖼️  Cover: ${hasCover ? '✅ ' + coverPath : '❌ None'}");
 
     // Check supported formats
     if (ext != '.mp4' && ext != '.mkv') {
-      print("⚠️  Unsupported format (only .mp4 and .mkv supported)");
-      print("=" * 60 + "\n");
+      debugPrint("⚠️  Unsupported format (only .mp4 and .mkv supported)");
+      debugPrint("=" * 60 + "\n");
       return;
     }
 
@@ -1456,23 +1492,23 @@ class CoreBackend {
 
     // Try format-specific tool first for maximum speed
     if (ext == '.mkv') {
-      print("🔧 Using mkvpropedit with XML tags (fast in-place)...");
+      debugPrint("🔧 Using mkvpropedit with XML tags (fast in-place)...");
       success = await _embedMetadataMkv(filePath, coverPath, metadata,
           settings: settings);
     } else if (ext == '.mp4') {
-      print("🔧 Attempting AtomicParsley (fast single-pass)...");
+      debugPrint("🔧 Attempting AtomicParsley (fast single-pass)...");
       success = await _embedMetadataMp4(filePath, coverPath, metadata,
           settings: settings);
     }
 
     // Fall back to FFmpeg if specialized tool failed or unavailable
     if (!success) {
-      print("⚠️  Falling back to FFmpeg (slower but reliable)...");
+      debugPrint("⚠️  Falling back to FFmpeg (slower but reliable)...");
       await _embedMetadataFFmpeg(filePath, coverPath, metadata,
           settings: settings);
     }
 
-    print("=" * 60 + "\n");
+    debugPrint("=" * 60 + "\n");
   }
 
   /// Embed metadata using FFmpeg (fallback method - slower but universal)
@@ -1484,8 +1520,8 @@ class CoreBackend {
 
     // Check FFmpeg (with settings)
     if (!await _checkFFmpegAvailable(settings: settings)) {
-      print("❌ FFmpeg not found - Configure in Settings or add to PATH");
-      print("=" * 60 + "\n");
+      debugPrint("❌ FFmpeg not found - Configure in Settings or add to PATH");
+      debugPrint("=" * 60 + "\n");
       return;
     }
 
@@ -1516,7 +1552,7 @@ class CoreBackend {
           '-disposition:v:0', '0',
           '-disposition:v:1', 'attached_pic',
         ]);
-        print("✅ MP4 cover will be embedded as attached_pic");
+        debugPrint("✅ MP4 cover will be embedded as attached_pic");
       } else {
         // MKV: Attach cover - codec BEFORE attach!
         args.addAll([
@@ -1529,7 +1565,7 @@ class CoreBackend {
           '-metadata:s:t',
           'filename=cover.jpg',
         ]);
-        print("✅ MKV cover will be attached");
+        debugPrint("✅ MKV cover will be attached");
       }
     } else {
       args.addAll([
@@ -1589,8 +1625,8 @@ class CoreBackend {
 
     args.add(tempPath);
 
-    print("📊 Metadata fields: $metaCount");
-    print("🔧 Command: ffmpeg ${args.take(10).join(' ')}...");
+    debugPrint("📊 Metadata fields: $metaCount");
+    debugPrint("🔧 Command: ffmpeg ${args.take(10).join(' ')}...");
 
     // === EXECUTE ===
     try {
@@ -1601,8 +1637,8 @@ class CoreBackend {
       if (result.exitCode == 0) {
         // Verify temp file
         if (!File(tempPath).existsSync()) {
-          print("❌ Temp file not created!");
-          print("=" * 60 + "\n");
+          debugPrint("❌ Temp file not created!");
+          debugPrint("=" * 60 + "\n");
           return;
         }
 
@@ -1610,34 +1646,34 @@ class CoreBackend {
         var origSize = File(filePath).lengthSync();
 
         if (tempSize == 0) {
-          print("❌ Temp file is empty!");
+          debugPrint("❌ Temp file is empty!");
           File(tempPath).deleteSync();
-          print("=" * 60 + "\n");
+          debugPrint("=" * 60 + "\n");
           return;
         }
 
-        print(
+        debugPrint(
             "📦 Size: ${(origSize / 1048576).toStringAsFixed(1)} MB → ${(tempSize / 1048576).toStringAsFixed(1)} MB");
 
         // Replace original
         try {
           File(filePath).deleteSync();
           File(tempPath).renameSync(filePath);
-          print(
+          debugPrint(
               "✅ SUCCESS! Embedded ${hasCover ? 'cover + ' : ''}$metaCount metadata fields");
         } catch (e) {
-          print("❌ Could not replace file: $e");
+          debugPrint("❌ Could not replace file: $e");
           if (File(tempPath).existsSync()) File(tempPath).deleteSync();
         }
       } else {
-        print("❌ FFmpeg failed (exit ${result.exitCode})");
+        debugPrint("❌ FFmpeg failed (exit ${result.exitCode})");
         if (result.stderr.toString().isNotEmpty) {
-          print("Error: ${result.stderr}");
+          debugPrint("Error: ${result.stderr}");
         }
         if (File(tempPath).existsSync()) File(tempPath).deleteSync();
       }
     } catch (e) {
-      print("❌ Exception: $e");
+      debugPrint("❌ Exception: $e");
       if (File(tempPath).existsSync()) {
         try {
           File(tempPath).deleteSync();

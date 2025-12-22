@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import '../backend/match_result.dart';
 import '../backend/core_backend.dart';
 import '../services/settings_service.dart';
+import '../services/tmdb_service.dart';
 import 'package:provider/provider.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'cover_picker_modal.dart';
@@ -97,7 +98,10 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
 
   /// Saves current editor state to parent
   void _saveChanges() {
-    if (!mounted) return;
+    if (!mounted) {
+      debugPrint("⚠️ _saveChanges called but not mounted");
+      return;
+    }
 
     List<String>? genres = _genresController.text.isNotEmpty
         ? _genresController.text
@@ -145,6 +149,7 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
       searchResults: widget.initialResult.searchResults,
     );
 
+    debugPrint("📤 Calling onSave with title: ${result.title}");
     widget.onSave(result);
   }
 
@@ -427,26 +432,197 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
         builder: (context) => SearchResultsPickerModal(
           searchResults: widget.initialResult.searchResults!,
           currentResult: widget.initialResult,
-          onSelected: (selectedResult) {
-            setState(() {
-              _titleController.text = selectedResult.title ?? "";
-              _yearController.text = selectedResult.year?.toString() ?? "";
-              _seasonController.text = selectedResult.season?.toString() ?? "";
-              _episodeController.text =
-                  selectedResult.episode?.toString() ?? "";
-              _episodeTitleController.text = selectedResult.episodeTitle ?? "";
-              _descriptionController.text = selectedResult.description ?? "";
-              _genresController.text = selectedResult.genres?.join(', ') ?? "";
-              _directorController.text = selectedResult.director ?? "";
-              _actorsController.text = selectedResult.actors?.join(', ') ?? "";
-              _ratingController.text = selectedResult.rating?.toString() ?? "";
-              _contentRatingController.text =
-                  selectedResult.contentRating ?? "";
-              _runtimeController.text =
-                  selectedResult.runtime?.toString() ?? "";
-              _posterUrlController.text = selectedResult.posterUrl ?? "";
-              _type = selectedResult.type ?? 'movie';
-            });
+          onSelected: (selectedResult) async {
+            debugPrint("🔄 Search result selected: ${selectedResult.title}");
+
+            // Fetch FULL metadata details using tmdbId
+            MatchResult fullMetadata = selectedResult;
+
+            if (selectedResult.tmdbId != null) {
+              final settings = context.read<SettingsService>();
+              debugPrint(
+                  "📡 Fetching full details for tmdbId: ${selectedResult.tmdbId}");
+
+              try {
+                if (selectedResult.type == 'episode') {
+                  // Fetch TV show details
+                  final tmdb = TmdbService(settings.tmdbApiKey);
+                  final details =
+                      await tmdb.getTVDetails(selectedResult.tmdbId!);
+                  final posters =
+                      await tmdb.getTVPosters(selectedResult.tmdbId!);
+
+                  if (details != null) {
+                    fullMetadata = MatchResult(
+                      newName: selectedResult.newName,
+                      posterUrl: selectedResult.posterUrl,
+                      title: details['name'] ?? selectedResult.title,
+                      year: selectedResult.year,
+                      season: selectedResult.season,
+                      episode: selectedResult.episode,
+                      episodeTitle: selectedResult.episodeTitle,
+                      type: 'episode',
+                      description: details['overview'],
+                      genres: TmdbService.extractGenres(details),
+                      actors: TmdbService.extractCast(details),
+                      rating: details['vote_average']?.toDouble(),
+                      contentRating:
+                          TmdbService.extractContentRating(details, true),
+                      runtime: details['episode_run_time']?.isNotEmpty == true
+                          ? details['episode_run_time'][0]
+                          : null,
+                      tmdbId: selectedResult.tmdbId,
+                      alternativePosterUrls: posters,
+                      searchResults: widget.initialResult.searchResults,
+                    );
+                    debugPrint(
+                        "✅ Fetched full TV details with ${fullMetadata.genres?.length ?? 0} genres");
+                  }
+                } else {
+                  // Fetch movie details
+                  final tmdb = TmdbService(settings.tmdbApiKey);
+                  final details =
+                      await tmdb.getMovieDetails(selectedResult.tmdbId!);
+                  final posters =
+                      await tmdb.getMoviePosters(selectedResult.tmdbId!);
+
+                  if (details != null) {
+                    fullMetadata = MatchResult(
+                      newName: selectedResult.newName,
+                      posterUrl: details['poster_path'] != null
+                          ? "https://image.tmdb.org/t/p/w500${details['poster_path']}"
+                          : selectedResult.posterUrl,
+                      title: details['title'] ?? selectedResult.title,
+                      year: selectedResult.year,
+                      type: 'movie',
+                      description: details['overview'],
+                      genres: TmdbService.extractGenres(details),
+                      actors: TmdbService.extractCast(details),
+                      director: TmdbService.extractDirector(details),
+                      rating: details['vote_average']?.toDouble(),
+                      contentRating:
+                          TmdbService.extractContentRating(details, false),
+                      runtime: details['runtime'],
+                      studio:
+                          details['production_companies']?.isNotEmpty == true
+                              ? details['production_companies'][0]['name']
+                              : null,
+                      tmdbId: selectedResult.tmdbId,
+                      imdbId: details['imdb_id'],
+                      alternativePosterUrls: posters,
+                      searchResults: widget.initialResult.searchResults,
+                    );
+                    debugPrint(
+                        "✅ Fetched full movie details with ${fullMetadata.genres?.length ?? 0} genres");
+                  }
+                }
+
+                // Download cover art
+                if (fullMetadata.posterUrl != null &&
+                    fullMetadata.posterUrl!.startsWith('http')) {
+                  try {
+                    final response =
+                        await http.get(Uri.parse(fullMetadata.posterUrl!));
+                    if (response.statusCode == 200) {
+                      fullMetadata = MatchResult(
+                        newName: fullMetadata.newName,
+                        posterUrl: fullMetadata.posterUrl,
+                        coverBytes: response.bodyBytes,
+                        title: fullMetadata.title,
+                        year: fullMetadata.year,
+                        season: fullMetadata.season,
+                        episode: fullMetadata.episode,
+                        episodeTitle: fullMetadata.episodeTitle,
+                        type: fullMetadata.type,
+                        description: fullMetadata.description,
+                        genres: fullMetadata.genres,
+                        director: fullMetadata.director,
+                        actors: fullMetadata.actors,
+                        rating: fullMetadata.rating,
+                        contentRating: fullMetadata.contentRating,
+                        runtime: fullMetadata.runtime,
+                        studio: fullMetadata.studio,
+                        tmdbId: fullMetadata.tmdbId,
+                        imdbId: fullMetadata.imdbId,
+                        alternativePosterUrls:
+                            fullMetadata.alternativePosterUrls,
+                        searchResults: fullMetadata.searchResults,
+                      );
+                      debugPrint("✅ Downloaded cover art");
+                    }
+                  } catch (e) {
+                    debugPrint("⚠️ Failed to download cover: $e");
+                  }
+                }
+              } catch (e) {
+                debugPrint("⚠️ Error fetching full details: $e");
+              }
+            }
+
+            debugPrint(
+                "   Final - Description: ${fullMetadata.description != null}");
+            debugPrint("   Final - Cover: ${fullMetadata.coverBytes != null}");
+            debugPrint("   Final - Rating: ${fullMetadata.rating}");
+            debugPrint("   Final - Genres: ${fullMetadata.genres?.join(', ')}");
+
+            if (!mounted) return;
+
+            // Temporarily remove all listeners
+            _titleController.removeListener(_saveChanges);
+            _yearController.removeListener(_saveChanges);
+            _seasonController.removeListener(_saveChanges);
+            _episodeController.removeListener(_saveChanges);
+            _episodeTitleController.removeListener(_saveChanges);
+            _descriptionController.removeListener(_saveChanges);
+            _genresController.removeListener(_saveChanges);
+            _directorController.removeListener(_saveChanges);
+            _actorsController.removeListener(_saveChanges);
+
+            // Update ALL fields from full metadata
+            _titleController.text = fullMetadata.title ?? "";
+            _yearController.text = fullMetadata.year?.toString() ?? "";
+            _seasonController.text = fullMetadata.season?.toString() ?? "";
+            _episodeController.text = fullMetadata.episode?.toString() ?? "";
+            _episodeTitleController.text = fullMetadata.episodeTitle ?? "";
+            _descriptionController.text = fullMetadata.description ?? "";
+            _genresController.text = fullMetadata.genres?.join(', ') ?? "";
+            _directorController.text = fullMetadata.director ?? "";
+            _actorsController.text = fullMetadata.actors?.join(', ') ?? "";
+            _ratingController.text = fullMetadata.rating?.toString() ?? "";
+            _contentRatingController.text = fullMetadata.contentRating ?? "";
+            _runtimeController.text = fullMetadata.runtime?.toString() ?? "";
+            _posterUrlController.text = fullMetadata.posterUrl ?? "";
+
+            // Update cover bytes if available
+            if (fullMetadata.coverBytes != null) {
+              _updatedCoverBytes = fullMetadata.coverBytes;
+              debugPrint("✅ Updated cover bytes");
+            } else {
+              _updatedCoverBytes = null;
+            }
+
+            // Update type and trigger rebuild
+            if (mounted) {
+              setState(() {
+                _type = fullMetadata.type ?? 'movie';
+              });
+            }
+
+            // Re-add all listeners
+            _titleController.addListener(_saveChanges);
+            _yearController.addListener(_saveChanges);
+            _seasonController.addListener(_saveChanges);
+            _episodeController.addListener(_saveChanges);
+            _episodeTitleController.addListener(_saveChanges);
+            _descriptionController.addListener(_saveChanges);
+            _genresController.addListener(_saveChanges);
+            _directorController.addListener(_saveChanges);
+            _actorsController.addListener(_saveChanges);
+
+            // Save complete result with all metadata
+            debugPrint("💾 Saving complete result with all metadata...");
+            widget.onSave(fullMetadata);
+            debugPrint("✅ Save complete");
           },
         ),
       );

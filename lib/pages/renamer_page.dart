@@ -27,42 +27,33 @@ class _RenamerPageState extends State<RenamerPage> {
       {}; // Track which items are currently being renamed
 
   Future<void> _pickFiles(BuildContext context) async {
+    // Read context values BEFORE any async operations
+    final fileState = context.read<FileStateService>();
+    final settings = context.read<SettingsService>();
+
     FilePickerResult? result =
         await FilePicker.platform.pickFiles(allowMultiple: true);
     if (result != null) {
       List<XFile> xFiles = result.paths.map((path) => XFile(path!)).toList();
-      final fileState = context.read<FileStateService>();
-      final settings = context.read<SettingsService>();
       await fileState.addFiles(xFiles, settings: settings);
 
-      // Show snackbar with results
+      // Check for FFmpeg warning (important for functionality)
       if (context.mounted && fileState.lastAddResult != null) {
         final addResult = fileState.lastAddResult!;
         final added = addResult['added'] ?? 0;
         final withMetadata = addResult['withMetadata'] ?? 0;
         final ffmpegMissing = (addResult['ffmpegMissing'] ?? 0) > 0;
 
+        // Show warning if FFmpeg is missing and files don't have metadata
+        if (ffmpegMissing && added > withMetadata) {
+          SnackbarHelper.showWarning(
+            context,
+            'FFmpeg not found. Configure in Settings → FFmpeg to read embedded metadata.',
+          );
+        }
+
+        // Extract covers in background (non-blocking)
         if (added > 0) {
-          String message = 'Added $added file${added > 1 ? 's' : ''}';
-          if (withMetadata > 0) {
-            message += ' ($withMetadata with existing metadata)';
-          }
-
-          SnackbarHelper.showSuccess(context, message);
-
-          // Show additional warning if FFmpeg is missing
-          if (ffmpegMissing && added > withMetadata) {
-            Future.delayed(const Duration(milliseconds: 800), () {
-              if (context.mounted) {
-                SnackbarHelper.showWarning(
-                  context,
-                  'FFmpeg not found. Configure in Settings → FFmpeg to read embedded metadata.',
-                );
-              }
-            });
-          }
-
-          // Extract covers in background (non-blocking)
           fileState.extractCoversInBackground(settings: settings);
         }
 
@@ -728,11 +719,11 @@ class _RenamerPageState extends State<RenamerPage> {
                   IconButton(
                     icon: const Icon(Icons.cloud_download_outlined, size: 20),
                     color: settings.accentColor,
-                    onPressed: () {
+                    onPressed: () async {
                       if (isRenamed) {
                         fileState.resetRenamedStatus(index);
                       }
-                      _performSearch(context, index, input, fileState,
+                      await _performSearch(context, index, input, fileState,
                           context.read<SettingsService>());
                     },
                     tooltip: "Search online metadata",

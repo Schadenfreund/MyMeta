@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import '../services/settings_service.dart';
 import 'windows_thumbnail.dart';
@@ -14,7 +15,7 @@ class CoverExtractor {
   }) async {
     final ext = p.extension(filePath).toLowerCase();
 
-    print('🖼️  Extracting cover from: ${p.basename(filePath)} ($ext)');
+    debugPrint('🖼️  Extracting cover from: ${p.basename(filePath)} ($ext)');
 
     Uint8List? bytes;
 
@@ -22,7 +23,7 @@ class CoverExtractor {
     try {
       bytes = await WindowsThumbnail.getThumbnail(filePath, size: 256);
       if (bytes != null) {
-        print('  ⚡ Got thumbnail from Windows Shell cache (instant)');
+        debugPrint('  ⚡ Got thumbnail from Windows Shell cache (instant)');
         return bytes;
       }
     } catch (e) {
@@ -42,7 +43,7 @@ class CoverExtractor {
     bytes = await _extractWithFFmpeg(filePath, settings);
     if (bytes != null) return bytes;
 
-    print('⚠️  Unable to extract cover art from ${p.basename(filePath)}');
+    debugPrint('⚠️  Unable to extract cover art from ${p.basename(filePath)}');
     return null;
   }
 
@@ -70,7 +71,7 @@ class CoverExtractor {
     String? ffmpegPath = await _getFFmpegPath(settings);
     if (ffmpegPath == null) return null;
 
-    print('  ⚡ Extracting cover directly to memory (no temp files)...');
+    debugPrint('  ⚡ Extracting cover directly to memory (no temp files)...');
 
     try {
       // Extract attached picture stream directly to stdout
@@ -102,14 +103,14 @@ class CoverExtractor {
     SettingsService? settings,
   ) async {
     try {
-      print('  🔍 Resolving AtomicParsley...');
+      debugPrint('  🔍 Resolving AtomicParsley...');
       String? atomicParsleyPath =
           await _resolveAtomicParsley(settings: settings);
       if (atomicParsleyPath == null) {
-        print('  ⚠️  AtomicParsley not found (download from GitHub)');
+        debugPrint('  ⚠️  AtomicParsley not found (download from GitHub)');
         return null;
       }
-      print('  ✅ Found AtomicParsley: $atomicParsleyPath');
+      debugPrint('  ✅ Found AtomicParsley: $atomicParsleyPath');
 
       // AtomicParsley extracts to same directory with _artwork_1.jpg suffix
       final fileDir = p.dirname(filePath);
@@ -140,7 +141,7 @@ class CoverExtractor {
         } catch (_) {}
       }
     } catch (e) {
-      print('  ⚠️  AtomicParsley failed: $e');
+      debugPrint('  ⚠️  AtomicParsley failed: $e');
     }
     return null;
   }
@@ -152,11 +153,11 @@ class CoverExtractor {
   ) async {
     String? ffmpegPath = await _getFFmpegPath(settings);
     if (ffmpegPath == null) {
-      print('  ⚠️  FFmpeg not available');
+      debugPrint('  ⚠️  FFmpeg not available');
       return null;
     }
 
-    print('  ↪️  Using FFmpeg fallback...');
+    debugPrint('  ↪️  Using FFmpeg fallback...');
     Uint8List? bytes;
 
     // Method 1: Extract attached picture (best quality, common in MKV)
@@ -314,7 +315,7 @@ class CoverExtractor {
         if (isJpeg || isPng) {
           String type = isJpeg ? 'JPEG' : 'PNG';
           String size = (bytes.length / 1024).toStringAsFixed(1);
-          print('  ✅ Extracted $type cover via $method: $size KB');
+          debugPrint('  ✅ Extracted $type cover via $method: $size KB');
           return bytes;
         }
       }

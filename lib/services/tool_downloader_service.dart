@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
@@ -74,7 +75,7 @@ class ToolDownloaderService {
         }
       }
     } catch (e) {
-      print('Recursive search failed for $toolName: $e');
+      debugPrint('Recursive search failed for $toolName: $e');
     }
 
     return null;
@@ -183,7 +184,7 @@ class ToolDownloaderService {
       progressCallback?.call(totalBytes, totalBytes, 'Complete!');
       return true;
     } catch (e) {
-      print('Error downloading $toolName: $e');
+      debugPrint('Error downloading $toolName: $e');
       rethrow;
     }
   }

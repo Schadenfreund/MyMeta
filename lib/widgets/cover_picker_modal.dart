@@ -98,7 +98,8 @@ class CoverPickerModal extends StatelessWidget {
                                   child: Icon(
                                     Icons.check_circle,
                                     size: 40,
-                                    color: Theme.of(context).colorScheme.primary,
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
                                   ),
                                 ),
                               ),
@@ -166,14 +167,25 @@ class SearchResultsPickerModal extends StatelessWidget {
                 itemCount: searchResults.length,
                 itemBuilder: (context, index) {
                   final result = searchResults[index];
-                  final isSelected =
-                      result.tmdbId == currentResult?.tmdbId ||
-                      result.imdbId == currentResult?.imdbId;
+
+                  // Better selection logic - compare by unique IDs or title+year
+                  final isSelected = currentResult != null &&
+                      ((result.tmdbId != null &&
+                              result.tmdbId == currentResult?.tmdbId) ||
+                          (result.imdbId != null &&
+                              result.imdbId == currentResult?.imdbId) ||
+                          (result.tmdbId == null &&
+                              result.imdbId == null &&
+                              result.title == currentResult?.title &&
+                              result.year == currentResult?.year));
 
                   return Card(
                     margin: const EdgeInsets.only(bottom: 8),
                     color: isSelected
-                        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
+                        ? Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withValues(alpha: 0.1)
                         : null,
                     child: ListTile(
                       leading: result.posterUrl != null &&
@@ -220,7 +232,7 @@ class SearchResultsPickerModal extends StatelessWidget {
                               Icons.check_circle,
                               color: Theme.of(context).colorScheme.primary,
                             )
-                          : null,
+                          : const Icon(Icons.chevron_right),
                       onTap: () {
                         onSelected(result);
                         Navigator.pop(context);
