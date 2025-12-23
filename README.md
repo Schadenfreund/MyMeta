@@ -13,7 +13,10 @@ MyMeta is a powerful, user-friendly desktop application for automatically fetchi
 ## ✨ Features
 
 ### **Automatic Metadata Fetching**
-- Search **The Movie Database (TMDB)** and **OMDb** for accurate metadata
+- Search **The Movie Database (TMDB)**, **OMDb**, and **AniDB** for accurate metadata
+- **TMDB** - Comprehensive movie and TV show data
+- **OMDb** - IMDb-based alternative source
+- **AniDB** - Specialized anime database
 - Automatic title, year, genre, cast, director, and rating extraction
 - High-quality cover art download and embedding
 
@@ -39,7 +42,8 @@ MyMeta is a powerful, user-friendly desktop application for automatically fetchi
 - **Centralized card design system** for consistent UX
 
 ### **Power User Features**
-- **Easy tool setup** - Download FFmpeg and optional tools with one click
+- **Easy tool setup** - Download FFmpeg, MKVToolNix, and AtomicParsley with one click
+- **60-120x faster processing** with specialized tools (MKVToolNix for MKV, AtomicParsley for MP4)
 - Undo rename operations
 - Folder exclusion lists
 - Format templates
@@ -67,6 +71,7 @@ Double-click `MyMeta.exe` - no installation needed!
 2. Get free API keys:
    - **TMDB:** [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
    - **OMDb:** [omdbapi.com/apikey.aspx](http://www.omdbapi.com/apikey.aspx)
+   - **AniDB (optional):** [wiki.anidb.net/API](https://wiki.anidb.net/API) - For anime metadata
 3. Paste keys in Settings
 
 ### **5. Start Organizing**
@@ -155,15 +160,20 @@ Customize how files are named:
 - **MKV** - Full metadata + cover art attachment
 
 ### **Metadata Providers**
-- **TMDB** - The Movie Database (comprehensive metadata)
+- **TMDB** - The Movie Database (comprehensive movie/TV metadata)
 - **OMDb** - IMDb data (alternative source)
+- **AniDB** - Anime Database (specialized anime metadata)
 
 ---
 
 ## ❓ FAQ
 
 ### **Do I need to install FFmpeg?**
-No manual installation needed! MyMeta has a built-in Setup dialog that downloads and configures FFmpeg with one click. Just go to Settings → Setup Tools → Download.
+No manual installation needed! MyMeta has a built-in Setup dialog that downloads and configures FFmpeg, MKVToolNix, and AtomicParsley with one click. Just go to Settings → Setup Tools → Download.
+
+- **FFmpeg** (required) - Core metadata embedding
+- **MKVToolNix** (optional) - 60-120x faster MKV processing
+- **AtomicParsley** (optional) - 60-120x faster MP4 processing
 
 ### **Does it modifyoriginal files?**
 Yes, but safely:

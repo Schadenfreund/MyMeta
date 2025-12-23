@@ -36,6 +36,12 @@ MyMeta needs API keys to fetch metadata. Both are **free** and take 2 minutes to
 3. Choose "FREE" tier (1,000 requests/day)
 4. Check your email for the API key
 
+#### **AniDB Client ID** (Optional - For Anime)
+1. Go to [wiki.anidb.net/API](https://wiki.anidb.net/API)
+2. Register for API access
+3. Follow instructions to get your Client ID
+4. Note: AniDB has strict rate limits
+
 ### **Adding Keys to MyMeta**
 1. Open MyMeta
 2. Click the **Settings** tab (gear icon in sidebar)
@@ -241,8 +247,9 @@ Your personal touch - changes:
 - Active elements
 
 ### **Metadata Source**
-- **TMDB:** More comprehensive, includes crew info
+- **TMDB:** Most comprehensive, includes crew info and extensive TV show data
 - **OMDb:** Alternative, IMDb-based data
+- **AniDB:** Specialized database for anime content
 
 ### **API Keys**
 - Required for metadata fetching
@@ -300,10 +307,11 @@ ffprobe your_file.mp4 2>&1 | Select-String "title"
 
 ## ❗ Troubleshooting
 
-### **"FFmpeg not found"**
-- FFmpeg should be bundled with MyMeta
-- Check if `ffmpeg.exe` is in the same folder as `MyMeta.exe`
-- If missing, re-download or run `bundle_ffmpeg.ps1`
+### **"FFmpeg not found" or Slow Processing**
+- Go to Settings → Setup Tools
+- Click "Download" for FFmpeg (required)
+- Optionally download MKVToolNix and AtomicParsley for 60-120x faster processing
+- Tools are automatically configured after download
 
 ### **No matches found**
 - Check internet connection
