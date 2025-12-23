@@ -12,6 +12,8 @@ MyMeta is a user-friendly desktop application for automatically fetching, editin
 
 ## ✨ Features
 
+![MyMeta - Search](https://github.com/user-attachments/assets/78b690f4-1e55-4cbb-b36e-ebafeaa03990)
+
 ### **Automatic Metadata Fetching**
 - Search **The Movie Database (TMDB)**, **OMDb**, and **AniDB** for accurate metadata
 - **TMDB** - Comprehensive movie and TV show data
@@ -20,7 +22,7 @@ MyMeta is a user-friendly desktop application for automatically fetching, editin
 - Automatic title, year, genre, cast, director, and rating extraction
 - High-quality cover art download and embedding
 
-### **Professional File Renaming**
+### **File Renaming**
 - Customizable naming templates for movies and TV shows
 - Smart filename parsing for better matching
 - Batch processing support
@@ -33,7 +35,7 @@ MyMeta is a user-friendly desktop application for automatically fetching, editin
   - **Cover art** (MP4 & MKV)
 - All metadata embedded directly into video files
 
-### **Beautiful, Modern UI**
+### **Modern UI**
 - Custom titlebar with window controls
 - **8 accent color themes** - Choose your favorite!
 - Dark & Light mode support
@@ -41,8 +43,12 @@ MyMeta is a user-friendly desktop application for automatically fetching, editin
 - Clean, professional interface
 - **Centralized card design system** for consistent UX
 
-### **Power User Features**
+### **User Features**
 - **Easy tool setup** - Download FFmpeg, MKVToolNix, and AtomicParsley with one click
+
+![MyMeta - setup](https://github.com/user-attachments/assets/b5aa87c9-438f-4f6b-a7ea-49b6fa10e266)
+
+  
 - **60-120x faster processing** with specialized tools (MKVToolNix for MKV, AtomicParsley for MP4)
 - Undo rename operations
 - Folder exclusion lists
