@@ -43,3 +43,13 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Tool binaries (downloaded on-demand by the app)
+windows/ffmpeg/
+assets/*.zip
+assets/*.7z
+assets/*.exe
+
+# User data
+UserData/
+
