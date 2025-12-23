@@ -76,23 +76,8 @@ class FileStateService with ChangeNotifier {
       _matchResults.clear();
       _matchResults.addAll(results);
 
-      // Update lifetime statistics
-      int newTvShows = 0;
-      int newMovies = 0;
-      for (var result in results) {
-        if (result.type == 'episode' && result.title?.isNotEmpty == true) {
-          newTvShows++;
-        } else if (result.type == 'movie' && result.title?.isNotEmpty == true) {
-          newMovies++;
-        }
-      }
-
-      if (newTvShows > 0) {
-        await settings.incrementTvShowMatches(newTvShows);
-      }
-      if (newMovies > 0) {
-        await settings.incrementMovieMatches(newMovies);
-      }
+      // Note: Statistics are incremented only on successful renames,
+      // not on matches. See renameSingleFile in renamer_page.dart
     } catch (e) {
       debugPrint("Error matching: $e");
     } finally {
@@ -167,12 +152,8 @@ class FileStateService with ChangeNotifier {
 
         _matchResults[index] = result;
 
-        // Update lifetime statistics for single match
-        if (result.type == 'episode' && result.title?.isNotEmpty == true) {
-          await settings.incrementTvShowMatches(1);
-        } else if (result.type == 'movie' && result.title?.isNotEmpty == true) {
-          await settings.incrementMovieMatches(1);
-        }
+        // Note: Statistics are incremented only on successful renames,
+        // not on matches. See renameSingleFile in renamer_page.dart
       }
     } catch (e) {
       debugPrint("Error matching single file: $e");

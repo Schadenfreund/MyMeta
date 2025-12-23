@@ -870,6 +870,14 @@ class _RenamerPageState extends State<RenamerPage> {
         });
 
         if (success) {
+          // Increment statistics for successfully renamed files
+          final output = fileState.matchResults[index];
+          if (output.type == 'episode') {
+            await settings.incrementTvShowMatches(1);
+          } else if (output.type == 'movie') {
+            await settings.incrementMovieMatches(1);
+          }
+
           SnackbarHelper.showSuccess(context, 'Applied successfully!');
         } else {
           SnackbarHelper.showError(context, 'Failed to apply.');
