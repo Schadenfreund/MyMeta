@@ -40,7 +40,7 @@ Track all notable changes, todos, and development guidelines.
 
 ---
 
-### **v1.6.1** - 2025-12-21
+### **v0.9.1** - 2025-12-21 (Internal)
 **UI Architecture Refactoring**
 
 #### Added
@@ -237,20 +237,17 @@ When making changes:
 
 ## 🔄 Version History
 
-### v1.0.0 (2025-12-22)
-- Production release with zero lint issues and comprehensive cleanup
+### v1.0.0 (2025-12-23)
+- Initial public release with zero lint issues
+- Full metadata integration (TMDB, OMDb, AniDB)
+- One-click tool setup
+- MIT licensed with proper third-party attributions
 
-### v1.6.1 (2025-12-21)
-- UI architecture refactoring with centralized components
-
-### v1.6.0 (2025-12-20)
-- One-click tool setup and MyMeta rebrand
-
-### v1.5.4 (2025-12)
+### v0.9.x (Internal Development)
+- UI architecture refactoring
 - Custom titlebar and accent color system
-
-### v1.5.0 (2025-11)
-- Initial stable release
+- One-click tool setup development
+- MyMeta rebrand from original project
 
 ---
 

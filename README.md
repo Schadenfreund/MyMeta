@@ -205,28 +205,17 @@ Yes! All processing happens locally. Only metadata queries go to TMDB/OMDb APIs.
 
 ## 📝 Changelog
 
-### **Version 1.6.0** - Current
-- **One-click tool setup** - Download FFmpeg and optional tools with ease
-- Portable tool storage in UserData folder
-- No more bundled executables - smaller download size
-- Rebranded to MyMeta
-- Beautiful sidebar with soft glow
-- Comprehensive UX improvements
-- Enhanced button organization
-- Full-width sidebar highlight
+### **Version 1.0.0** - Current (Initial Public Release)
+- Zero lint issues - production-ready code quality
+- TMDB, OMDb & AniDB metadata integration
+- One-click tool setup (FFmpeg, MKVToolNix, AtomicParsley)
+- 8 accent color themes with dark/light mode
+- Cover art embedding for MP4 & MKV files
+- Customizable naming templates
+- Portable design - no installation needed
+- Modern, polished UI with custom titlebar
 
-### **Version 1.5.4**
-- Custom titlebar with window controls
-- Accent color system (8 colors)
-- Inline metadata editing always available
-- Bulletproof embedding with FFmpeg caching
-- Settings & Formats page redesign
-
-### **Version 1.5.0**
-- Initial stable release
-- TMDB & OMDb integration
-- Cover art embedding
-- Extended metadata support
+See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ---
 
@@ -255,15 +244,23 @@ MIT License - Feel free to use, modify, and distribute.
 ## 🙏 Credits
 
 **Built with:**
-- Flutter - Cross-platform framework
-- FFmpeg - Media processing
-- TMDB API - Movie/TV metadata
-- OMDb API - IMDb data
+- [Flutter](https://flutter.dev) - Cross-platform framework
+- [TMDB API](https://www.themoviedb.org) - Movie/TV metadata
+- [OMDb API](https://www.omdbapi.com) - IMDb data
 
-**Special Thanks:**
-- The Flutter team
-- TMDB community
-- FFmpeg developers
+---
+
+## 🔧 Third-Party Tools
+
+MyMeta uses the following optional external tools (downloaded separately on-demand):
+
+| Tool | License | Purpose |
+|------|---------|--------|
+| [FFmpeg](https://ffmpeg.org) | LGPL/GPL | Media processing & metadata embedding |
+| [MKVToolNix](https://mkvtoolnix.download) | GPL 2.0 | Fast MKV metadata editing |
+| [AtomicParsley](https://github.com/wez/atomicparsley) | GPL 2.0 | Fast MP4 metadata editing |
+
+**Note:** These tools are NOT bundled with MyMeta. They are downloaded by the user on first launch and executed as separate external processes. See [LICENSE](LICENSE) for details.
 
 ---
 

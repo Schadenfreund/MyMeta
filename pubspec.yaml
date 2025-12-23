@@ -1,7 +1,7 @@
 name: mymeta
 description: MyMeta - Professional media file metadata manager and renamer
 publish_to: 'none'
-version: 1.6.0+1
+version: 1.0.0
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -19,6 +19,7 @@ dependencies:
   window_manager: ^0.3.5
   url_launcher: ^6.2.1
   http: ^1.2.0
+  xml: ^6.3.0
   package_info_plus: ^8.0.0
   path_provider: ^2.1.0
 

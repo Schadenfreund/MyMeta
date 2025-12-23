@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../services/settings_service.dart';
@@ -9,22 +8,6 @@ import '../services/settings_service.dart';
 /// Shows app icon, name, version, and a support link.
 class AboutCard extends StatelessWidget {
   const AboutCard({super.key});
-
-  Future<void> _openPayPal(BuildContext context) async {
-    final Uri url = Uri.parse('https://www.paypal.com/paypalme/ivburic');
-    try {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not open PayPal. Visit: paypal.me/ivburic'),
-            duration: Duration(seconds: 4),
-          ),
-        );
-      }
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +22,7 @@ class AboutCard extends StatelessWidget {
     return FutureBuilder<PackageInfo>(
       future: PackageInfo.fromPlatform(),
       builder: (context, snapshot) {
-        final version = snapshot.data?.version ?? '1.6.1';
+        final version = snapshot.data?.version ?? '1.0.0';
 
         return Container(
           decoration: BoxDecoration(
@@ -167,65 +150,6 @@ class AboutCard extends StatelessWidget {
                         ),
                       ),
                     ],
-                  ),
-                ),
-
-                const SizedBox(height: AppSpacing.lg),
-
-                // Centered "Made With..." message
-                Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Made with ',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: isDark
-                                  ? AppColors.darkTextPrimary
-                                  : AppColors.lightTextPrimary,
-                            ),
-                      ),
-                      Icon(
-                        Icons.favorite,
-                        size: 16,
-                        color: accentColor,
-                      ),
-                      Text(
-                        ' for you to enjoy. Please consider supporting the development.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: isDark
-                                  ? AppColors.darkTextPrimary
-                                  : AppColors.lightTextPrimary,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-
-                // Support Button - Centered
-                Center(
-                  child: ElevatedButton(
-                    onPressed: () => _openPayPal(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: accentColor,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      elevation: 2,
-                    ),
-                    child: const Text(
-                      'Support',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
                   ),
                 ),
               ],

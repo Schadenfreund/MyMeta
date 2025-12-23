@@ -435,10 +435,24 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
           onSelected: (selectedResult) async {
             debugPrint("🔄 Search result selected: ${selectedResult.title}");
 
-            // Fetch FULL metadata details using tmdbId
+            // Check if selectedResult already has complete metadata
+            // (from centralized search via toggle)
+            bool hasCompleteMetadata = selectedResult.description != null ||
+                selectedResult.genres != null ||
+                selectedResult.actors != null;
+
             MatchResult fullMetadata = selectedResult;
 
-            if (selectedResult.tmdbId != null) {
+            // For TV shows with season/episode, ALWAYS fetch episode title
+            // even if other metadata is complete
+            bool needsEpisodeFetch = selectedResult.type == 'episode' &&
+                selectedResult.season != null &&
+                selectedResult.episode != null &&
+                selectedResult.tmdbId != null;
+
+            // Only fetch additional details if metadata is incomplete OR we need episode title
+            if ((!hasCompleteMetadata || needsEpisodeFetch) &&
+                selectedResult.tmdbId != null) {
               final settings = context.read<SettingsService>();
               debugPrint(
                   "📡 Fetching full details for tmdbId: ${selectedResult.tmdbId}");
@@ -452,6 +466,32 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
                   final posters =
                       await tmdb.getTVPosters(selectedResult.tmdbId!);
 
+                  String? episodeTitle = selectedResult.episodeTitle;
+
+                  // Fetch episode title for this specific show
+                  if (selectedResult.season != null &&
+                      selectedResult.episode != null) {
+                    debugPrint(
+                        '🔎 Fetching episode S${selectedResult.season}E${selectedResult.episode} for selected show');
+                    try {
+                      final episodeLookup = await tmdb.getEpisodeLookup(
+                          selectedResult.tmdbId!, [selectedResult.season!]);
+                      String key =
+                          "S${selectedResult.season}E${selectedResult.episode}";
+                      if (episodeLookup.containsKey(key)) {
+                        episodeTitle = episodeLookup[key];
+                        debugPrint('✅ Fetched episode title: $episodeTitle');
+                      } else {
+                        debugPrint(
+                            '⚠️ Episode $key not found - clearing title');
+                        episodeTitle = null;
+                      }
+                    } catch (e) {
+                      debugPrint('Error fetching episode title: $e');
+                      episodeTitle = null;
+                    }
+                  }
+
                   if (details != null) {
                     fullMetadata = MatchResult(
                       newName: selectedResult.newName,
@@ -460,19 +500,28 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
                       year: selectedResult.year,
                       season: selectedResult.season,
                       episode: selectedResult.episode,
-                      episodeTitle: selectedResult.episodeTitle,
+                      episodeTitle: episodeTitle,
                       type: 'episode',
-                      description: details['overview'],
-                      genres: TmdbService.extractGenres(details),
-                      actors: TmdbService.extractCast(details),
-                      rating: details['vote_average']?.toDouble(),
-                      contentRating:
-                          TmdbService.extractContentRating(details, true),
+                      description:
+                          details['overview'] ?? selectedResult.description,
+                      genres: hasCompleteMetadata
+                          ? selectedResult.genres
+                          : TmdbService.extractGenres(details),
+                      actors: hasCompleteMetadata
+                          ? selectedResult.actors
+                          : TmdbService.extractCast(details),
+                      rating: details['vote_average']?.toDouble() ??
+                          selectedResult.rating,
+                      contentRating: hasCompleteMetadata
+                          ? selectedResult.contentRating
+                          : TmdbService.extractContentRating(details, true),
                       runtime: details['episode_run_time']?.isNotEmpty == true
                           ? details['episode_run_time'][0]
-                          : null,
+                          : selectedResult.runtime,
                       tmdbId: selectedResult.tmdbId,
-                      alternativePosterUrls: posters,
+                      alternativePosterUrls: posters.isNotEmpty
+                          ? posters
+                          : selectedResult.alternativePosterUrls,
                       searchResults: widget.initialResult.searchResults,
                     );
                     debugPrint(
@@ -516,46 +565,47 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
                         "✅ Fetched full movie details with ${fullMetadata.genres?.length ?? 0} genres");
                   }
                 }
-
-                // Download cover art
-                if (fullMetadata.posterUrl != null &&
-                    fullMetadata.posterUrl!.startsWith('http')) {
-                  try {
-                    final response =
-                        await http.get(Uri.parse(fullMetadata.posterUrl!));
-                    if (response.statusCode == 200) {
-                      fullMetadata = MatchResult(
-                        newName: fullMetadata.newName,
-                        posterUrl: fullMetadata.posterUrl,
-                        coverBytes: response.bodyBytes,
-                        title: fullMetadata.title,
-                        year: fullMetadata.year,
-                        season: fullMetadata.season,
-                        episode: fullMetadata.episode,
-                        episodeTitle: fullMetadata.episodeTitle,
-                        type: fullMetadata.type,
-                        description: fullMetadata.description,
-                        genres: fullMetadata.genres,
-                        director: fullMetadata.director,
-                        actors: fullMetadata.actors,
-                        rating: fullMetadata.rating,
-                        contentRating: fullMetadata.contentRating,
-                        runtime: fullMetadata.runtime,
-                        studio: fullMetadata.studio,
-                        tmdbId: fullMetadata.tmdbId,
-                        imdbId: fullMetadata.imdbId,
-                        alternativePosterUrls:
-                            fullMetadata.alternativePosterUrls,
-                        searchResults: fullMetadata.searchResults,
-                      );
-                      debugPrint("✅ Downloaded cover art");
-                    }
-                  } catch (e) {
-                    debugPrint("⚠️ Failed to download cover: $e");
-                  }
-                }
               } catch (e) {
                 debugPrint("⚠️ Error fetching full details: $e");
+              }
+            } else if (hasCompleteMetadata) {
+              debugPrint("✅ Using complete metadata from search result");
+            }
+
+            // Download cover art if available
+            if (fullMetadata.posterUrl != null &&
+                fullMetadata.posterUrl!.startsWith('http')) {
+              try {
+                final response =
+                    await http.get(Uri.parse(fullMetadata.posterUrl!));
+                if (response.statusCode == 200) {
+                  fullMetadata = MatchResult(
+                    newName: fullMetadata.newName,
+                    posterUrl: fullMetadata.posterUrl,
+                    coverBytes: response.bodyBytes,
+                    title: fullMetadata.title,
+                    year: fullMetadata.year,
+                    season: fullMetadata.season,
+                    episode: fullMetadata.episode,
+                    episodeTitle: fullMetadata.episodeTitle,
+                    type: fullMetadata.type,
+                    description: fullMetadata.description,
+                    genres: fullMetadata.genres,
+                    director: fullMetadata.director,
+                    actors: fullMetadata.actors,
+                    rating: fullMetadata.rating,
+                    contentRating: fullMetadata.contentRating,
+                    runtime: fullMetadata.runtime,
+                    studio: fullMetadata.studio,
+                    tmdbId: fullMetadata.tmdbId,
+                    imdbId: fullMetadata.imdbId,
+                    alternativePosterUrls: fullMetadata.alternativePosterUrls,
+                    searchResults: fullMetadata.searchResults,
+                  );
+                  debugPrint("✅ Downloaded cover art");
+                }
+              } catch (e) {
+                debugPrint("⚠️ Failed to download cover: $e");
               }
             }
 
@@ -564,6 +614,9 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
             debugPrint("   Final - Cover: ${fullMetadata.coverBytes != null}");
             debugPrint("   Final - Rating: ${fullMetadata.rating}");
             debugPrint("   Final - Genres: ${fullMetadata.genres?.join(', ')}");
+            debugPrint("   Final - Season: ${fullMetadata.season}");
+            debugPrint("   Final - Episode: ${fullMetadata.episode}");
+            debugPrint("   Final - EpisodeTitle: ${fullMetadata.episodeTitle}");
 
             if (!mounted) return;
 
@@ -618,6 +671,9 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
             _genresController.addListener(_saveChanges);
             _directorController.addListener(_saveChanges);
             _actorsController.addListener(_saveChanges);
+
+            // Regenerate filename with new metadata
+            _regenerateName();
 
             // Save complete result with all metadata
             debugPrint("💾 Saving complete result with all metadata...");
