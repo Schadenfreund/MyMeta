@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/settings_service.dart';
 import '../widgets/accent_color_picker.dart';
 import '../widgets/about_card.dart';
@@ -37,6 +38,22 @@ class _SettingsPageState extends State<SettingsPage> {
       0xFF14B8A6: 'Teal',
     };
     return colorMap[color.value] ?? 'Custom';
+  }
+
+  Future<void> _openPayPal(BuildContext context) async {
+    final Uri url = Uri.parse('https://www.paypal.com/paypalme/ivburic');
+    try {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open PayPal. Visit: paypal.me/ivburic'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -132,37 +149,6 @@ class _SettingsPageState extends State<SettingsPage> {
             description: 'Choose where to fetch metadata from',
             accentColor: settings.accentColor,
             children: [
-              AppSettingRow(
-                title: 'Preferred Provider',
-                description: 'Select metadata provider',
-                control: DropdownButton<String>(
-                  value: settings.metadataSource,
-                  underline: const SizedBox(),
-                  borderRadius:
-                      BorderRadius.circular(AppDimensions.inputBorderRadius),
-                  onChanged: (String? newValue) {
-                    if (newValue != null) {
-                      settings.setMetadataSource(newValue);
-                    }
-                  },
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'tmdb',
-                      child: Text('The Movie Database (TMDB)'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'omdb',
-                      child: Text('OMDb (IMDb Data)'),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Divider(
-                height: 1,
-                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-              ),
-              const SizedBox(height: AppSpacing.md),
               AppLabeledInput(
                 label: 'TMDB API Key',
                 description: 'Get your key from themoviedb.org',
@@ -178,6 +164,15 @@ class _SettingsPageState extends State<SettingsPage> {
                 input: _ApiKeyInput(
                   value: settings.omdbApiKey,
                   onChanged: settings.setOmdbApiKey,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AppLabeledInput(
+                label: 'AniDB Client ID',
+                description: 'Register your client at wiki.anidb.net/API',
+                input: _ApiKeyInput(
+                  value: settings.anidbClientId,
+                  onChanged: settings.setAnidbClientId,
                 ),
               ),
             ],
@@ -207,41 +202,60 @@ class _SettingsPageState extends State<SettingsPage> {
 
           const SizedBox(height: AppSpacing.lg),
 
-          // Reset Button
+          // Made with ❤️ message and Support button
           Center(
-            child: TextButton.icon(
-              onPressed: () async {
-                bool? confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Reset Settings'),
-                    content: const Text(
-                      'This will reset all settings to default values. Continue?',
+            child: Column(
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Made with ',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: isDark
+                                ? AppColors.darkTextPrimary
+                                : AppColors.lightTextPrimary,
+                          ),
                     ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancel'),
-                      ),
-                      ElevatedButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.lightDanger,
-                        ),
-                        child: const Text('Reset'),
-                      ),
-                    ],
+                    Icon(
+                      Icons.favorite,
+                      size: 16,
+                      color: settings.accentColor,
+                    ),
+                    Text(
+                      ' for you to enjoy. Please consider supporting the development.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: isDark
+                                ? AppColors.darkTextPrimary
+                                : AppColors.lightTextPrimary,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.md),
+                ElevatedButton(
+                  onPressed: () => _openPayPal(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: settings.accentColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    elevation: 2,
                   ),
-                );
-                if (confirm == true) {
-                  await settings.resetSettings();
-                }
-              },
-              icon: const Icon(Icons.refresh),
-              label: const Text('Reset All Settings'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppColors.lightDanger,
-              ),
+                  child: const Text(
+                    'Support',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
 

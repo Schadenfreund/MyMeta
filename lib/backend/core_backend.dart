@@ -6,6 +6,7 @@ import 'media_record.dart';
 import 'match_result.dart';
 import '../services/tmdb_service.dart';
 import '../services/omdb_service.dart';
+import '../services/anidb_service.dart';
 import '../services/settings_service.dart';
 import '../utils/cover_extractor.dart';
 import 'package:http/http.dart' as http;
@@ -22,540 +23,485 @@ class CoreBackend {
     return result;
   }
 
-  static Future<List<MatchResult>> matchTitles(
-    List<MediaRecord> records, {
-    required String seriesFormat,
-    required String movieFormat,
-    String? tmdbApiKey,
-    String? omdbApiKey,
-    String metadataSource = 'tmdb',
+  /// Centralized metadata search method
+  /// Searches for movies or TV shows and returns results with full metadata
+  /// For TV shows, preserves season/episode/episodeTitle from the original file
+  static Future<List<MatchResult>> searchMetadata({
+    required String title,
+    int? year,
+    required bool isMovie,
+    required String source, // 'tmdb' or 'omdb'
+    required String apiKey,
+    int? season, // For TV shows - preserved from original file
+    int? episode, // For TV shows - preserved from original file
+    String? episodeTitle, // For TV shows - preserved from original file
   }) async {
     List<MatchResult> results = [];
-    TmdbService? tmdb;
-    OmdbService? omdb;
 
-    if (metadataSource == 'tmdb' &&
-        tmdbApiKey != null &&
-        tmdbApiKey.isNotEmpty) {
-      tmdb = TmdbService(tmdbApiKey);
-    } else if (metadataSource == 'omdb' &&
-        omdbApiKey != null &&
-        omdbApiKey.isNotEmpty) {
-      omdb = OmdbService(omdbApiKey);
-    }
+    try {
+      if (source == 'tmdb') {
+        final tmdb = TmdbService(apiKey);
 
-    for (var record in records) {
-      if (record.type == 'episode') {
-        String format = seriesFormat;
-        String? episodeTitle = "Title";
-        String? seriesName = record.title;
-        int? year = record.year;
-        String? posterUrl;
+        if (isMovie) {
+          // Search for movies and fetch full details for each
+          final allResults = await tmdb.searchMovieAll(title, year);
 
-        if (tmdb != null && record.title != null) {
-          // TMDB Logic
-          try {
-            var show = await tmdb.searchTV(record.title!);
-            if (show != null) {
-              seriesName = show['name'];
-              String? date = show['first_air_date'];
-              if (date != null && date.length >= 4) {
-                year = int.tryParse(date.substring(0, 4));
-              }
-              if (show['poster_path'] != null) {
-                posterUrl =
-                    "https://image.tmdb.org/t/p/w500${show['poster_path']}";
-              }
+          for (var result in allResults) {
+            int? movieId = result['id'];
 
-              // Fetch detailed metadata
-              int? tvId = show['id'];
-              Map<String, dynamic>? details;
-              List<String>? genres;
-              List<String>? actors;
-              String? description;
-              double? rating;
-              String? contentRating;
-              int? tmdbId;
+            // Basic info from search
+            String? posterUrl = result['poster_path'] != null
+                ? "https://image.tmdb.org/t/p/w500${result['poster_path']}"
+                : null;
 
-              if (tvId != null) {
-                details = await tmdb.getTVDetails(tvId);
-                if (details != null) {
-                  tmdbId = tvId;
-                  genres = TmdbService.extractGenres(details);
-                  actors = TmdbService.extractCast(details);
-                  description = details['overview'];
-                  rating = details['vote_average']?.toDouble();
-                  contentRating =
-                      TmdbService.extractContentRating(details, true);
-                }
-              }
+            // Variables for detailed metadata
+            List<String>? genres;
+            String? director;
+            List<String>? actors;
+            String? description = result['overview'];
+            double? rating = result['vote_average']?.toDouble();
+            String? contentRating;
+            int? runtime;
+            List<String>? alternativePosters;
 
-              if (record.season != null && record.episode != null) {
-                try {
-                  var lookup =
-                      await tmdb.getEpisodeLookup(show['id'], [record.season!]);
-                  String key = "S${record.season}E${record.episode}";
-                  if (lookup.containsKey(key)) {
-                    episodeTitle = lookup[key];
-                  }
-                } catch (e) {
-                  debugPrint("Episode lookup error TMDB: $e");
-                }
-              }
-
-              // Fetch alternative posters for this TV show
-              List<String>? alternativePosters;
-              if (tvId != null) {
-                try {
-                  alternativePosters = await tmdb.getTVPosters(tvId);
-                } catch (e) {
-                  debugPrint("Error fetching alternative posters: $e");
-                }
-              }
-
-              // Fetch all search results for re-matching
-              List<MatchResult>? searchResults;
+            // Fetch full details if we have an ID
+            if (movieId != null) {
               try {
-                var allResults = await tmdb.searchTVAll(record.title!);
-                searchResults = [];
-                for (var result in allResults) {
-                  String? rSeriesName = result['name'];
-                  int? rYear;
-                  String? date = result['first_air_date'];
-                  if (date != null && date.length >= 4) {
-                    rYear = int.tryParse(date.substring(0, 4));
-                  }
-                  String? rPosterUrl;
-                  if (result['poster_path'] != null) {
-                    rPosterUrl =
-                        "https://image.tmdb.org/t/p/w500${result['poster_path']}";
-                  }
-                  double? rRating = result['vote_average']?.toDouble();
-                  int? rTmdbId = result['id'];
-
-                  searchResults.add(MatchResult(
-                    newName: rSeriesName ?? "Unknown",
-                    posterUrl: rPosterUrl,
-                    title: rSeriesName,
-                    year: rYear,
-                    type: 'episode',
-                    rating: rRating,
-                    tmdbId: rTmdbId,
-                  ));
-                }
-              } catch (e) {
-                debugPrint("Error fetching search results: $e");
-              }
-
-              var context = {
-                "series_name": seriesName,
-                "year": year,
-                "season_number": record.season?.toString().padLeft(2, '0'),
-                "episode_number": record.episode?.toString().padLeft(2, '0'),
-                "episode_title": episodeTitle
-              };
-
-              results.add(MatchResult(
-                  newName:
-                      "${createFormattedTitle(format, context)}.${record.container}",
-                  posterUrl: posterUrl,
-                  title: seriesName,
-                  year: year,
-                  season: record.season,
-                  episode: record.episode,
-                  episodeTitle: episodeTitle,
-                  type: 'episode',
-                  description: description,
-                  genres: genres,
-                  actors: actors,
-                  rating: rating,
-                  contentRating: contentRating,
-                  tmdbId: tmdbId,
-                  alternativePosterUrls: alternativePosters,
-                  searchResults: searchResults));
-              continue; // Skip to next record
-            }
-          } catch (e) {
-            debugPrint("TMDB Search Error: $e");
-          }
-        } else if (omdb != null && record.title != null) {
-          // OMDb Logic
-          try {
-            var show = await omdb.searchSeries(record.title!);
-            if (show != null) {
-              seriesName = show['Title'];
-              String? date = show['Year']; // Format might be "2005–"
-              if (date != null && date.length >= 4) {
-                // Simple extraction
-                var yearMatch = RegExp(r'\d{4}').firstMatch(date);
-                if (yearMatch != null) year = int.parse(yearMatch.group(0)!);
-              }
-              if (show['Poster'] != null && show['Poster'] != 'N/A') {
-                posterUrl = show['Poster'];
-              }
-
-              // Fetch detailed metadata
-              String? imdbId = show['imdbID'];
-              Map<String, dynamic>? details;
-              List<String>? genres;
-              List<String>? actors;
-              String? description;
-              double? rating;
-              String? contentRating;
-
-              if (imdbId != null) {
-                details = await omdb.getSeriesDetails(imdbId);
+                final details = await tmdb.getMovieDetails(movieId);
                 if (details != null) {
-                  genres = OmdbService.extractGenres(details);
-                  actors = OmdbService.extractActors(details);
-                  description = details['Plot'];
-                  if (description == 'N/A') description = null;
-                  rating = OmdbService.extractRating(details);
-                  contentRating = OmdbService.extractContentRating(details);
-                }
-              }
-
-              if (record.season != null && record.episode != null) {
-                try {
-                  var lookup = await omdb
-                      .getEpisodeLookup(show['imdbID'], [record.season!]);
-                  String key = "S${record.season}E${record.episode}";
-                  if (lookup.containsKey(key)) {
-                    episodeTitle = lookup[key];
-                  }
-                } catch (e) {
-                  debugPrint("Episode lookup error OMDB: $e");
-                }
-              }
-
-              // Fetch all search results for re-matching
-              List<MatchResult>? searchResults;
-              try {
-                var allResults = await omdb.searchSeriesAll(record.title!);
-                searchResults = [];
-                for (var result in allResults) {
-                  String? rSeriesName = result['Title'];
-                  int? rYear;
-                  String? date = result['Year'];
-                  if (date != null && date.length >= 4) {
-                    var yearMatch = RegExp(r'\d{4}').firstMatch(date);
-                    if (yearMatch != null)
-                      rYear = int.parse(yearMatch.group(0)!);
-                  }
-                  String? rPosterUrl;
-                  if (result['Poster'] != null && result['Poster'] != 'N/A') {
-                    rPosterUrl = result['Poster'];
-                  }
-                  double? rRating = OmdbService.extractRating(result);
-                  String? rImdbId = result['imdbID'];
-
-                  searchResults.add(MatchResult(
-                    newName: rSeriesName ?? "Unknown",
-                    posterUrl: rPosterUrl,
-                    title: rSeriesName,
-                    year: rYear,
-                    type: 'episode',
-                    rating: rRating,
-                    imdbId: rImdbId,
-                  ));
-                }
-              } catch (e) {
-                debugPrint("Error fetching search results: $e");
-              }
-
-              var context = {
-                "series_name": seriesName,
-                "year": year,
-                "season_number": record.season?.toString().padLeft(2, '0'),
-                "episode_number": record.episode?.toString().padLeft(2, '0'),
-                "episode_title": episodeTitle
-              };
-
-              results.add(MatchResult(
-                  newName:
-                      "${createFormattedTitle(format, context)}.${record.container}",
-                  posterUrl: posterUrl,
-                  title: seriesName,
-                  year: year,
-                  season: record.season,
-                  episode: record.episode,
-                  episodeTitle: episodeTitle,
-                  type: 'episode',
-                  description: description,
-                  genres: genres,
-                  actors: actors,
-                  rating: rating,
-                  contentRating: contentRating,
-                  imdbId: imdbId,
-                  searchResults: searchResults));
-              continue; // Skip to next record
-            }
-          } catch (e) {
-            debugPrint("OMDb Search Error: $e");
-          }
-        }
-
-        var context = {
-          "series_name": seriesName,
-          "year": year,
-          "season_number": record.season?.toString().padLeft(2, '0'),
-          "episode_number": record.episode?.toString().padLeft(2, '0'),
-          "episode_title": episodeTitle
-        };
-
-        results.add(MatchResult(
-            newName:
-                "${createFormattedTitle(format, context)}.${record.container}",
-            posterUrl: posterUrl,
-            title: seriesName,
-            year: year,
-            season: record.season,
-            episode: record.episode,
-            episodeTitle: episodeTitle,
-            type: 'episode'));
-      } else {
-        String format = movieFormat;
-        String? movieName = record.title;
-        int? year = record.year;
-        String? posterUrl;
-
-        if (tmdb != null && record.title != null) {
-          // TMDB Logic
-          try {
-            var movie = await tmdb.searchMovie(record.title!, record.year);
-            if (movie != null) {
-              movieName = movie['title'];
-              String? date = movie['release_date'];
-              if (date != null && date.length >= 4) {
-                year = int.tryParse(date.substring(0, 4));
-              }
-              if (movie['poster_path'] != null) {
-                posterUrl =
-                    "https://image.tmdb.org/t/p/w500${movie['poster_path']}";
-              }
-
-              // Fetch detailed metadata
-              int? movieId = movie['id'];
-              Map<String, dynamic>? details;
-              List<String>? genres;
-              String? director;
-              List<String>? actors;
-              String? description;
-              double? rating;
-              String? contentRating;
-              int? runtime;
-              int? tmdbId;
-
-              if (movieId != null) {
-                details = await tmdb.getMovieDetails(movieId);
-                if (details != null) {
-                  tmdbId = movieId;
                   genres = TmdbService.extractGenres(details);
                   director = TmdbService.extractDirector(details);
                   actors = TmdbService.extractCast(details);
-                  description = details['overview'];
-                  rating = details['vote_average']?.toDouble();
+                  description = details['overview'] ?? description;
+                  rating = details['vote_average']?.toDouble() ?? rating;
                   contentRating =
                       TmdbService.extractContentRating(details, false);
                   runtime = details['runtime'];
                 }
-              }
 
-              // Fetch alternative posters for this movie
-              List<String>? alternativePosters;
-              if (movieId != null) {
-                try {
-                  alternativePosters = await tmdb.getMoviePosters(movieId);
-                } catch (e) {
-                  debugPrint("Error fetching alternative posters: $e");
-                }
+                // Fetch alternative posters
+                alternativePosters = await tmdb.getMoviePosters(movieId);
+              } catch (e) {
+                debugPrint('Error fetching movie details for ID $movieId: $e');
               }
+            }
 
-              // Fetch all search results for re-matching
-              List<MatchResult>? searchResults;
+            results.add(MatchResult(
+              newName: result['title'] ?? 'Unknown',
+              posterUrl: posterUrl,
+              title: result['title'],
+              year: result['release_date'] != null &&
+                      result['release_date'].length >= 4
+                  ? int.tryParse(result['release_date'].substring(0, 4))
+                  : null,
+              type: 'movie',
+              description: description,
+              genres: genres,
+              director: director,
+              actors: actors,
+              rating: rating,
+              contentRating: contentRating,
+              runtime: runtime,
+              tmdbId: movieId,
+              alternativePosterUrls: alternativePosters,
+            ));
+          }
+        } else {
+          // Search for TV shows and fetch full details for each
+          final allResults = await tmdb.searchTVAll(title);
+
+          for (var result in allResults) {
+            int? tvId = result['id'];
+
+            // Basic info from search
+            String? posterUrl = result['poster_path'] != null
+                ? "https://image.tmdb.org/t/p/w500${result['poster_path']}"
+                : null;
+
+            // Variables for detailed metadata
+            List<String>? genres;
+            List<String>? actors;
+            String? description = result['overview'];
+            double? rating = result['vote_average']?.toDouble();
+            String? contentRating;
+            List<String>? alternativePosters;
+            String? fetchedEpisodeTitle =
+                episodeTitle; // Start with provided value
+
+            // Fetch full details if we have an ID
+            if (tvId != null) {
               try {
-                var allResults =
-                    await tmdb.searchMovieAll(record.title!, record.year);
-                searchResults = [];
-                for (var result in allResults) {
-                  String? rMovieName = result['title'];
-                  int? rYear;
-                  String? date = result['release_date'];
-                  if (date != null && date.length >= 4) {
-                    rYear = int.tryParse(date.substring(0, 4));
-                  }
-                  String? rPosterUrl;
-                  if (result['poster_path'] != null) {
-                    rPosterUrl =
-                        "https://image.tmdb.org/t/p/w500${result['poster_path']}";
-                  }
-                  double? rRating = result['vote_average']?.toDouble();
-                  int? rTmdbId = result['id'];
+                final details = await tmdb.getTVDetails(tvId);
+                if (details != null) {
+                  genres = TmdbService.extractGenres(details);
+                  actors = TmdbService.extractCast(details);
+                  description = details['overview'] ?? description;
+                  rating = details['vote_average']?.toDouble() ?? rating;
+                  contentRating =
+                      TmdbService.extractContentRating(details, true);
+                }
 
-                  searchResults.add(MatchResult(
-                    newName: rMovieName ?? "Unknown",
-                    posterUrl: rPosterUrl,
-                    title: rMovieName,
-                    year: rYear,
-                    type: 'movie',
-                    rating: rRating,
-                    tmdbId: rTmdbId,
-                  ));
+                // Fetch alternative posters
+                alternativePosters = await tmdb.getTVPosters(tvId);
+
+                // Fetch specific episode title if season/episode provided
+                if (season != null && episode != null) {
+                  debugPrint(
+                      '🔎 Fetching episode title for S${season}E${episode} from TMDB show $tvId');
+                  try {
+                    final episodeLookup =
+                        await tmdb.getEpisodeLookup(tvId, [season]);
+                    String key = "S${season}E${episode}";
+                    if (episodeLookup.containsKey(key)) {
+                      fetchedEpisodeTitle = episodeLookup[key];
+                      debugPrint(
+                          '✅ Fetched episode title for $key: $fetchedEpisodeTitle');
+                    } else {
+                      debugPrint(
+                          '⚠️ Show "${result['name']}" doesn\'t have $key - skipping');
+                      continue; // Skip this show - it doesn't have this episode
+                    }
+                  } catch (e) {
+                    debugPrint(
+                        'Error fetching episode title: $e - skipping show');
+                    continue; // Skip on error too
+                  }
                 }
               } catch (e) {
-                debugPrint("Error fetching search results: $e");
+                debugPrint('Error fetching TV details for ID $tvId: $e');
+                continue; // Skip this result
               }
-
-              var context = {"movie_name": movieName, "year": year};
-              results.add(MatchResult(
-                  newName:
-                      "${createFormattedTitle(format, context)}.${record.container}",
-                  posterUrl: posterUrl,
-                  title: movieName,
-                  year: year,
-                  type: 'movie',
-                  description: description,
-                  genres: genres,
-                  director: director,
-                  actors: actors,
-                  rating: rating,
-                  contentRating: contentRating,
-                  runtime: runtime,
-                  tmdbId: tmdbId,
-                  alternativePosterUrls: alternativePosters,
-                  searchResults: searchResults));
-              continue; // Skip to next record
             }
-          } catch (e) {
-            debugPrint("TMDB Movie Search Error: $e");
+
+            results.add(MatchResult(
+              newName: result['name'] ?? 'Unknown',
+              posterUrl: posterUrl,
+              title: result['name'],
+              year: result['first_air_date'] != null &&
+                      result['first_air_date'].length >= 4
+                  ? int.tryParse(result['first_air_date'].substring(0, 4))
+                  : null,
+              season: season,
+              episode: episode,
+              episodeTitle: fetchedEpisodeTitle,
+              type: 'episode',
+              description: description,
+              genres: genres,
+              actors: actors,
+              rating: rating,
+              contentRating: contentRating,
+              tmdbId: tvId,
+              alternativePosterUrls: alternativePosters,
+            ));
           }
-        } else if (omdb != null && record.title != null) {
-          // OMDb Logic
-          try {
-            var movie = await omdb.searchMovie(record.title!, record.year);
-            if (movie != null) {
-              movieName = movie['Title'];
-              String? date = movie['Year'];
-              if (date != null && date.length >= 4) {
-                var yearMatch = RegExp(r'\d{4}').firstMatch(date);
-                if (yearMatch != null) year = int.parse(yearMatch.group(0)!);
-              }
-              if (movie['Poster'] != null && movie['Poster'] != 'N/A') {
-                posterUrl = movie['Poster'];
-              }
+        }
+      } else if (source == 'omdb') {
+        final omdb = OmdbService(apiKey);
 
-              // Fetch detailed metadata
-              String? imdbId = movie['imdbID'];
-              Map<String, dynamic>? details;
-              List<String>? genres;
-              String? director;
-              List<String>? actors;
-              String? description;
-              double? rating;
-              String? contentRating;
-              int? runtime;
+        if (isMovie) {
+          // Search for movies and fetch full details for each
+          final allResults = await omdb.searchMovieAll(title, year);
 
-              if (imdbId != null) {
-                details = await omdb.getMovieDetails(imdbId);
+          for (var result in allResults) {
+            String? imdbId = result['imdbID'];
+
+            // Basic info from search
+            String? posterUrl =
+                result['Poster'] != null && result['Poster'] != 'N/A'
+                    ? result['Poster']
+                    : null;
+
+            // Variables for detailed metadata
+            List<String>? genres;
+            String? director;
+            List<String>? actors;
+            String? description;
+            double? rating = OmdbService.extractRating(result);
+            String? contentRating;
+            int? runtime;
+
+            // Fetch full details if we have an ID
+            if (imdbId != null) {
+              try {
+                final details = await omdb.getMovieDetails(imdbId);
                 if (details != null) {
                   genres = OmdbService.extractGenres(details);
                   director = OmdbService.extractDirector(details);
                   actors = OmdbService.extractActors(details);
                   description = details['Plot'];
                   if (description == 'N/A') description = null;
-                  rating = OmdbService.extractRating(details);
+                  rating = OmdbService.extractRating(details) ?? rating;
                   contentRating = OmdbService.extractContentRating(details);
                   runtime = OmdbService.extractRuntime(details);
                 }
+              } catch (e) {
+                debugPrint(
+                    'Error fetching movie details for IMDb ID $imdbId: $e');
               }
+            }
 
-              // Fetch all search results for re-matching
-              List<MatchResult>? searchResults;
+            results.add(MatchResult(
+              newName: result['Title'] ?? 'Unknown',
+              posterUrl: posterUrl,
+              title: result['Title'],
+              year: result['Year'] != null && result['Year'].length >= 4
+                  ? int.tryParse(
+                      RegExp(r'\d{4}').firstMatch(result['Year'])?.group(0) ??
+                          '')
+                  : null,
+              type: 'movie',
+              description: description,
+              genres: genres,
+              director: director,
+              actors: actors,
+              rating: rating,
+              contentRating: contentRating,
+              runtime: runtime,
+              imdbId: imdbId,
+            ));
+          }
+        } else {
+          // Search for TV shows and fetch full details for each
+          final allResults = await omdb.searchSeriesAll(title);
+
+          for (var result in allResults) {
+            String? imdbId = result['imdbID'];
+
+            // Basic info from search
+            String? posterUrl =
+                result['Poster'] != null && result['Poster'] != 'N/A'
+                    ? result['Poster']
+                    : null;
+
+            // Variables for detailed metadata
+            List<String>? genres;
+            List<String>? actors;
+            String? description;
+            double? rating = OmdbService.extractRating(result);
+            String? contentRating;
+            String? fetchedEpisodeTitle =
+                episodeTitle; // Start with provided value
+
+            // Fetch full details if we have an ID
+            if (imdbId != null) {
               try {
-                var allResults =
-                    await omdb.searchMovieAll(record.title!, record.year);
-                searchResults = [];
-                for (var result in allResults) {
-                  String? rMovieName = result['Title'];
-                  int? rYear;
-                  String? date = result['Year'];
-                  if (date != null && date.length >= 4) {
-                    var yearMatch = RegExp(r'\d{4}').firstMatch(date);
-                    if (yearMatch != null)
-                      rYear = int.parse(yearMatch.group(0)!);
-                  }
-                  String? rPosterUrl;
-                  if (result['Poster'] != null && result['Poster'] != 'N/A') {
-                    rPosterUrl = result['Poster'];
-                  }
-                  double? rRating = OmdbService.extractRating(result);
-                  String? rImdbId = result['imdbID'];
+                final details = await omdb.getSeriesDetails(imdbId);
+                if (details != null) {
+                  genres = OmdbService.extractGenres(details);
+                  actors = OmdbService.extractActors(details);
+                  description = details['Plot'];
+                  if (description == 'N/A') description = null;
+                  rating = OmdbService.extractRating(details) ?? rating;
+                  contentRating = OmdbService.extractContentRating(details);
+                }
 
-                  searchResults.add(MatchResult(
-                    newName: rMovieName ?? "Unknown",
-                    posterUrl: rPosterUrl,
-                    title: rMovieName,
-                    year: rYear,
-                    type: 'movie',
-                    rating: rRating,
-                    imdbId: rImdbId,
-                  ));
+                // Fetch specific episode title if season/episode provided
+                if (season != null && episode != null) {
+                  debugPrint(
+                      '🔎 Fetching episode title for S${season}E${episode} from OMDb series $imdbId');
+                  try {
+                    final episodeLookup =
+                        await omdb.getEpisodeLookup(imdbId, [season]);
+                    String key = "S${season}E${episode}";
+                    if (episodeLookup.containsKey(key)) {
+                      fetchedEpisodeTitle = episodeLookup[key];
+                      debugPrint(
+                          '✅ Fetched episode title for $key: $fetchedEpisodeTitle');
+                    } else {
+                      debugPrint(
+                          '⚠️ Show "${result['Title']}" doesn\'t have $key - skipping');
+                      continue; // Skip this show - it doesn't have this episode
+                    }
+                  } catch (e) {
+                    debugPrint(
+                        'Error fetching episode title: $e - skipping show');
+                    continue; // Skip on error too
+                  }
                 }
               } catch (e) {
-                debugPrint("Error fetching search results: $e");
+                debugPrint(
+                    'Error fetching series details for IMDb ID $imdbId: $e');
+                continue; // Skip this result
               }
-
-              var context = {"movie_name": movieName, "year": year};
-              results.add(MatchResult(
-                  newName:
-                      "${createFormattedTitle(format, context)}.${record.container}",
-                  posterUrl: posterUrl,
-                  title: movieName,
-                  year: year,
-                  type: 'movie',
-                  description: description,
-                  genres: genres,
-                  director: director,
-                  actors: actors,
-                  rating: rating,
-                  contentRating: contentRating,
-                  runtime: runtime,
-                  imdbId: imdbId,
-                  searchResults: searchResults));
-              continue; // Skip to next record
             }
-          } catch (e) {
-            debugPrint("OMDb Movie Search Error: $e");
+
+            results.add(MatchResult(
+              newName: result['Title'] ?? 'Unknown',
+              posterUrl: posterUrl,
+              title: result['Title'],
+              year: result['Year'] != null && result['Year'].length >= 4
+                  ? int.tryParse(
+                      RegExp(r'\d{4}').firstMatch(result['Year'])?.group(0) ??
+                          '')
+                  : null,
+              season: season,
+              episode: episode,
+              episodeTitle: fetchedEpisodeTitle,
+              type: 'episode',
+              description: description,
+              genres: genres,
+              actors: actors,
+              rating: rating,
+              contentRating: contentRating,
+              imdbId: imdbId,
+            ));
           }
         }
+      } else if (source == 'anidb') {
+        // AniDB search - primarily for anime content
+        final anidb = AnidbService(apiKey);
 
-        var context = {"movie_name": movieName, "year": year};
-        results.add(MatchResult(
-            newName:
-                "${createFormattedTitle(format, context)}.${record.container}",
-            posterUrl: posterUrl,
-            title: movieName,
-            year: year,
-            type: 'movie'));
+        // Note: AniDB API returns XML and needs proper parsing implementation
+        // For now, this returns empty results
+        debugPrint(
+            '⚠️ AniDB search selected but XML parsing not yet implemented');
+        debugPrint('   Please implement XML parsing in anidb_service.dart');
+
+        // Placeholder for when AniDB is fully implemented
+        try {
+          await anidb.searchAnimeAll(title);
+          // When implemented, process results here similar to TMDB/OMDb
+        } catch (e) {
+          debugPrint('AniDB search error: $e');
+        }
       }
+    } catch (e) {
+      debugPrint('Search error: $e');
+      rethrow;
     }
 
     return results;
   }
 
-  static void performFileRenaming(
-      List<String> oldPaths, List<String> newNames) {
-    if (oldPaths.length != newNames.length) {
-      throw Exception("Count mismatch");
+  /// Batch match multiple media records to metadata
+  /// Now uses centralized searchMetadata for consistency
+  static Future<List<MatchResult>> matchTitles(
+    List<MediaRecord> records, {
+    required String seriesFormat,
+    required String movieFormat,
+    String? tmdbApiKey,
+    String? omdbApiKey,
+    String? anidbClientId,
+    String metadataSource = 'tmdb',
+  }) async {
+    List<MatchResult> results = [];
+
+    // Determine which API source to use
+    String? activeSource;
+    String? activeApiKey;
+
+    if (tmdbApiKey != null && tmdbApiKey.isNotEmpty) {
+      activeSource = 'tmdb';
+      activeApiKey = tmdbApiKey;
+    } else if (omdbApiKey != null && omdbApiKey.isNotEmpty) {
+      activeSource = 'omdb';
+      activeApiKey = omdbApiKey;
+    } else if (anidbClientId != null && anidbClientId.isNotEmpty) {
+      activeSource = 'anidb';
+      activeApiKey = anidbClientId;
     }
 
+    if (activeSource == null || activeApiKey == null) {
+      debugPrint('⚠️ No API keys configured for batch matching');
+      return results;
+    }
+
+    debugPrint('📦 Batch matching ${records.length} files using $activeSource');
+
+    for (var record in records) {
+      try {
+        if (record.title == null) {
+          debugPrint('⚠️ Skipping record with no title');
+          continue;
+        }
+
+        // Use centralized search to get comprehensive metadata
+        final searchResults = await searchMetadata(
+          title: record.title!,
+          year: record.year,
+          isMovie: record.type == 'movie',
+          source: activeSource,
+          apiKey: activeApiKey,
+          season: record.season,
+          episode: record.episode,
+          episodeTitle: null, // Will be fetched for the matched show
+        );
+
+        if (searchResults.isEmpty) {
+          debugPrint('⚠️ No results found for: ${record.title}');
+          continue;
+        }
+
+        // Take the first result as the best match
+        final bestMatch = searchResults.first;
+
+        // Create formatted filename
+        String format = record.type == 'episode' ? seriesFormat : movieFormat;
+        Map<String, dynamic> context;
+
+        if (record.type == 'episode') {
+          context = {
+            "series_name": bestMatch.title,
+            "year": bestMatch.year,
+            "season_number": record.season?.toString().padLeft(2, '0'),
+            "episode_number": record.episode?.toString().padLeft(2, '0'),
+            "episode_title": bestMatch.episodeTitle ?? "Title"
+          };
+        } else {
+          context = {
+            "movie_name": bestMatch.title,
+            "year": bestMatch.year,
+          };
+        }
+
+        // Create the final match result with formatted name and all search results
+        results.add(MatchResult(
+          newName:
+              "${createFormattedTitle(format, context)}.${record.container}",
+          posterUrl: bestMatch.posterUrl,
+          title: bestMatch.title,
+          year: bestMatch.year,
+          season: bestMatch.season,
+          episode: bestMatch.episode,
+          episodeTitle: bestMatch.episodeTitle,
+          type: bestMatch.type,
+          description: bestMatch.description,
+          genres: bestMatch.genres,
+          director: bestMatch.director,
+          actors: bestMatch.actors,
+          rating: bestMatch.rating,
+          contentRating: bestMatch.contentRating,
+          runtime: bestMatch.runtime,
+          studio: bestMatch.studio,
+          tmdbId: bestMatch.tmdbId,
+          imdbId: bestMatch.imdbId,
+          alternativePosterUrls: bestMatch.alternativePosterUrls,
+          searchResults: searchResults, // All results for fix match modal
+          coverBytes: null, // Will be downloaded separately if needed
+        ));
+
+        debugPrint('✅ Matched: ${record.title} -> ${bestMatch.title}');
+      } catch (e) {
+        debugPrint('❌ Error matching ${record.title}: $e');
+        // Continue with next record instead of failing entire batch
+      }
+    }
+
+    debugPrint(
+        '📦 Batch matching complete: ${results.length}/${records.length} matched');
+    return results;
+  }
+
+  /// Perform batch file renaming
+  static void performFileRenaming(
+      List<String> oldPaths, List<String> newNames) {
     for (int i = 0; i < oldPaths.length; i++) {
       String oldPath = oldPaths[i];
-      String newName = newNames[i];
-      String parent = p.dirname(oldPath);
-      String newPath = p.join(parent, newName);
-
-      File(oldPath).renameSync(newPath);
+      String newPath = p.join(p.dirname(oldPath), newNames[i]);
+      if (oldPath != newPath) {
+        debugPrint('Renaming: $oldPath -> $newPath');
+        File(oldPath).renameSync(newPath);
+      }
     }
   }
 

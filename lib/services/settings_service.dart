@@ -13,6 +13,7 @@ class SettingsService with ChangeNotifier {
   bool _filenameAnalysisOnly = false;
   String _tmdbApiKey = "";
   String _omdbApiKey = "";
+  String _anidbClientId = "";
   String _metadataSource = "tmdb";
   Color _accentColor = const Color(0xFFBE0AB4); // Custom Pink default
   String _ffmpegPath = ""; // Stores the folder path
@@ -44,6 +45,7 @@ class SettingsService with ChangeNotifier {
   bool get filenameAnalysisOnly => _filenameAnalysisOnly;
   String get tmdbApiKey => _tmdbApiKey;
   String get omdbApiKey => _omdbApiKey;
+  String get anidbClientId => _anidbClientId;
   String get metadataSource => _metadataSource;
   Color get accentColor => _accentColor;
   String get ffmpegPath => _ffmpegPath;
@@ -119,6 +121,7 @@ class SettingsService with ChangeNotifier {
       // API Keys
       _tmdbApiKey = data['tmdb_api_key'] ?? "";
       _omdbApiKey = data['omdb_api_key'] ?? "";
+      _anidbClientId = data['anidb_client_id'] ?? "";
       _metadataSource = data['metadata_source'] ?? "tmdb";
 
       // Accent Color
@@ -161,6 +164,7 @@ class SettingsService with ChangeNotifier {
         'filename_analysis_only': _filenameAnalysisOnly,
         'tmdb_api_key': _tmdbApiKey,
         'omdb_api_key': _omdbApiKey,
+        'anidb_client_id': _anidbClientId,
         'metadata_source': _metadataSource,
         'accent_color': _accentColor.toARGB32(),
         'ffmpeg_path': _ffmpegPath,
@@ -233,6 +237,12 @@ class SettingsService with ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setAnidbClientId(String id) async {
+    _anidbClientId = id;
+    await _saveSettings();
+    notifyListeners();
+  }
+
   Future<void> setMetadataSource(String source) async {
     _metadataSource = source;
     await _saveSettings();
@@ -293,6 +303,7 @@ class SettingsService with ChangeNotifier {
     _filenameAnalysisOnly = false;
     _tmdbApiKey = "";
     _omdbApiKey = "";
+    _anidbClientId = "";
     _metadataSource = "tmdb";
     _accentColor = const Color(0xFFBE0AB4); // Custom Pink default
     _ffmpegPath = "";

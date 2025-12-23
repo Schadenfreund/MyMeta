@@ -69,6 +69,7 @@ class FileStateService with ChangeNotifier {
         movieFormat: settings.movieFormat,
         tmdbApiKey: settings.tmdbApiKey,
         omdbApiKey: settings.omdbApiKey,
+        anidbClientId: settings.anidbClientId,
         metadataSource: settings.metadataSource,
       );
 
@@ -115,6 +116,7 @@ class FileStateService with ChangeNotifier {
         movieFormat: settings.movieFormat,
         tmdbApiKey: settings.tmdbApiKey,
         omdbApiKey: settings.omdbApiKey,
+        anidbClientId: settings.anidbClientId,
         metadataSource: settings.metadataSource,
       );
 
