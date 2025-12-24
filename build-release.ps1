@@ -1,12 +1,20 @@
 # MyMeta Windows Release Build Script
 # Run this script to create a release package
 
-param(
-    [string]$Version = "1.0.1"
-)
-
 $ErrorActionPreference = "Stop"
 
+# Read version from pubspec.yaml
+$pubspecContent = Get-Content "pubspec.yaml" -Raw
+if ($pubspecContent -match 'version:\s*(\d+\.\d+\.\d+)') {
+    $Version = $matches[1]
+    Write-Host "📦 Detected version: $Version from pubspec.yaml" -ForegroundColor Cyan
+}
+else {
+    Write-Host "❌ Could not find version in pubspec.yaml" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  MyMeta Release Builder v$Version" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
