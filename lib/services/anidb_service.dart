@@ -1,7 +1,8 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import 'package:xml/xml.dart';
+import '../utils/http_client.dart';
+import '../utils/safe_parser.dart';
+import '../constants/app_constants.dart';
 
 /// Service for interacting with AniDB HTTP API
 /// AniDB is focused on anime content
@@ -13,11 +14,12 @@ class AnidbService {
   AnidbService(this.clientId, {this.clientVersion = '1'});
 
   static const String baseUrl = 'http://api.anidb.net:9001/httpapi';
+  static const Duration _anidbDelay = Duration(milliseconds: 500);
+  static const Duration _jikanDelay = Duration(milliseconds: 350);
 
   /// Search for anime by title using hybrid approach:
   /// 1. Try exact match via AniDB HTTP API (aname parameter)
   /// 2. Fall back to Jikan API (unofficial MAL API) for fuzzy search
-  /// Jikan provides MAL IDs which can be cross-referenced to AniDB
   Future<List<Map<String, dynamic>>> searchAnimeAll(String query) async {
     if (clientId.isEmpty) {
       throw Exception('AniDB client ID is required');
@@ -40,14 +42,11 @@ class AnidbService {
       }
 
       // Method 2: Use Jikan API (unofficial MAL API) for fuzzy search
-      // Jikan is free, requires no API key, and has good search
       try {
         final jikanResults = await _searchViaJikan(query);
 
-        // Add Jikan results (they'll have MAL IDs, not AniDB IDs)
-        // We store them as-is and note they're from MAL
+        // Add Jikan results avoiding duplicates
         for (var result in jikanResults) {
-          // Avoid duplicates based on title
           bool isDuplicate = results.any(
             (r) =>
                 r['title']?.toString().toLowerCase() ==
@@ -68,7 +67,7 @@ class AnidbService {
       return results;
     } catch (e) {
       debugPrint('❌ AniDB search error: $e');
-      return results; // Return whatever we found
+      return results;
     }
   }
 
@@ -79,25 +78,25 @@ class AnidbService {
     );
 
     // Respect rate limiting
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future.delayed(_anidbDelay);
 
-    final response = await http.get(url);
-
-    if (response.statusCode != 200) {
-      return null;
-    }
+    final body = await ApiClient.getString(url);
+    if (body == null) return null;
 
     // Parse XML response
-    final document = XmlDocument.parse(response.body);
+    final document = XmlDocument.parse(body);
     final animeElement = document.findElements('anime').firstOrNull;
 
-    if (animeElement == null) {
-      return null;
-    }
+    if (animeElement == null) return null;
 
-    // Extract basic info for search result
+    return _parseAnimeElement(animeElement);
+  }
+
+  /// Parse anime element from XML to Map
+  Map<String, dynamic> _parseAnimeElement(XmlElement animeElement) {
     final Map<String, dynamic> data = {};
 
+    // Extract titles
     final titles = animeElement.findElements('titles').firstOrNull;
     if (titles != null) {
       final mainTitle = titles
@@ -107,7 +106,6 @@ class AnidbService {
           ?.innerText;
       data['title'] = mainTitle;
 
-      // Also get English title if available
       final engTitle = titles
           .findElements('title')
           .where((t) => t.getAttribute('xml:lang') == 'en')
@@ -119,7 +117,7 @@ class AnidbService {
     // Get AID from attribute
     final aid = animeElement.getAttribute('id');
     if (aid != null) {
-      data['aid'] = int.tryParse(aid);
+      data['aid'] = SafeParser.parseInt(aid);
     }
 
     data['type'] = animeElement.findElements('type').firstOrNull?.innerText;
@@ -131,17 +129,17 @@ class AnidbService {
         animeElement.findElements('description').firstOrNull?.innerText;
 
     // Get poster/image URL
-    final picture = animeElement.findElements('picture').firstOrNull?.innerText;
+    final picture =
+        animeElement.findElements('picture').firstOrNull?.innerText;
     if (picture != null) {
       data['poster_url'] = 'https://cdn-eu.anidb.net/images/main/$picture';
     }
 
-    data['source'] = 'anidb'; // Mark as coming from AniDB
+    data['source'] = 'anidb';
 
-    // Extract ratings (AniDB uses permanent/temporary/average)
+    // Extract ratings
     final ratings = animeElement.findElements('ratings').firstOrNull;
     if (ratings != null) {
-      // Prefer permanent rating, fallback to temporary
       final permanent = ratings.findElements('permanent').firstOrNull;
       final temporary = ratings.findElements('temporary').firstOrNull;
 
@@ -160,7 +158,7 @@ class AnidbService {
           .map((t) => t.findElements('name').firstOrNull?.innerText)
           .where((name) => name != null)
           .cast<String>()
-          .take(5) // Limit to top 5 tags
+          .take(5)
           .toList();
       if (tagList.isNotEmpty) {
         data['tags'] = tagList;
@@ -171,78 +169,56 @@ class AnidbService {
   }
 
   /// Search via Jikan API (unofficial MyAnimeList API)
-  /// This provides better fuzzy search than AniDB HTTP API
   Future<List<Map<String, dynamic>>> _searchViaJikan(String query) async {
     final url = Uri.parse(
-      'https://api.jikan.moe/v4/anime?q=${Uri.encodeComponent(query)}&limit=10',
+      'https://api.jikan.moe/v4/anime?q=${Uri.encodeComponent(query)}&limit=${SearchConfig.maxSearchResults}',
     );
 
-    // Respect Jikan rate limiting (3 requests/second, 60/minute)
-    await Future.delayed(const Duration(milliseconds: 350));
+    // Respect Jikan rate limiting
+    await Future.delayed(_jikanDelay);
 
-    final response = await http.get(url);
+    final data = await ApiClient.getJson(url);
+    if (data == null) return [];
 
-    if (response.statusCode != 200) {
-      debugPrint('⚠️ Jikan API error: ${response.statusCode}');
-      return [];
-    }
+    final dataList = data['data'] as List?;
+    if (dataList == null || dataList.isEmpty) return [];
 
-    final jsonData = json.decode(response.body);
-    final dataList = jsonData['data'] as List?;
-
-    if (dataList == null || dataList.isEmpty) {
-      return [];
-    }
-
-    List<Map<String, dynamic>> results = [];
-
-    for (var anime in dataList.take(10)) {
-      // Extract genres from Jikan
-      List<String>? genres;
-      if (anime['genres'] != null) {
-        genres = (anime['genres'] as List)
-            .map((g) => g['name']?.toString() ?? '')
-            .where((name) => name.isNotEmpty)
-            .toList();
-      }
+    return dataList.take(SearchConfig.maxSearchResults).map((anime) {
+      // Extract genres
+      final genres = (anime['genres'] as List?)
+          ?.map((g) => g['name']?.toString() ?? '')
+          .where((name) => name.isNotEmpty)
+          .toList();
 
       // Extract studios
-      List<String>? studios;
-      if (anime['studios'] != null) {
-        studios = (anime['studios'] as List)
-            .map((s) => s['name']?.toString() ?? '')
-            .where((name) => name.isNotEmpty)
-            .toList();
-      }
+      final studios = (anime['studios'] as List?)
+          ?.map((s) => s['name']?.toString() ?? '')
+          .where((name) => name.isNotEmpty)
+          .toList();
 
-      // Extract age rating (rating field in Jikan is age rating: G, PG, PG-13, R, etc.)
+      // Extract and clean age rating
       String? ageRating = anime['rating']?.toString();
-      // Clean up the rating text (e.g., "PG-13 - Teens 13 or older" -> "PG-13")
       if (ageRating != null && ageRating.contains(' - ')) {
         ageRating = ageRating.split(' - ').first.trim();
       }
 
-      // Convert Jikan/MAL data to our format
-      Map<String, dynamic> data = {
+      return {
         'title': anime['title'],
         'english_title': anime['title_english'],
-        'mal_id': anime['mal_id'], // MAL ID, not AniDB ID
+        'mal_id': anime['mal_id'],
         'type': anime['type'],
         'episodecount': anime['episodes']?.toString(),
-        'startdate': anime['aired']?['from']?.toString().substring(0, 10),
+        'startdate': SafeParser.safeSubstring(
+            anime['aired']?['from']?.toString(), 0, 10),
         'description': anime['synopsis'],
         'poster_url': anime['images']?['jpg']?['large_image_url'],
-        'rating': anime['score']?.toString(), // Numeric rating (e.g., 8.5)
-        'age_rating': ageRating, // Age rating (G, PG, PG-13, R, etc.)
-        'tags': genres, // Use genres as tags
-        'studios': studios, // Studio names
-        'source': 'mal', // Mark as coming from MAL/Jikan
+        'rating': anime['score']?.toString(),
+        'age_rating': ageRating,
+        'tags': genres,
+        'studios': studios,
+        'source': 'mal',
       };
-
-      results.add(data);
-    }
-
-    return results;
+    }).toList();
   }
 
   /// Get anime details by AID (AniDB ID)
@@ -257,19 +233,12 @@ class AnidbService {
       );
 
       debugPrint('📡 Fetching AniDB anime details: $aid');
+      await Future.delayed(_anidbDelay);
 
-      // Add delay to respect rate limiting (2 requests per second max)
-      await Future.delayed(const Duration(milliseconds: 500));
+      final body = await ApiClient.getString(url);
+      if (body == null) return null;
 
-      final response = await http.get(url);
-
-      if (response.statusCode != 200) {
-        debugPrint('⚠️ AniDB API error: ${response.statusCode}');
-        return null;
-      }
-
-      // Parse XML response
-      final document = XmlDocument.parse(response.body);
+      final document = XmlDocument.parse(body);
       final animeElement = document.findElements('anime').firstOrNull;
 
       if (animeElement == null) {
@@ -277,49 +246,8 @@ class AnidbService {
         return null;
       }
 
-      // Extract data from XML
-      final Map<String, dynamic> data = {};
-
-      // Basic info
-      final titles = animeElement.findElements('titles').firstOrNull;
-      if (titles != null) {
-        final mainTitle = titles
-            .findElements('title')
-            .where((t) => t.getAttribute('type') == 'main')
-            .firstOrNull
-            ?.innerText;
-        data['title'] = mainTitle;
-      }
-
+      final data = _parseAnimeElement(animeElement);
       data['aid'] = aid;
-      data['type'] = animeElement.findElements('type').firstOrNull?.innerText;
-      data['episodecount'] =
-          animeElement.findElements('episodecount').firstOrNull?.innerText;
-      data['startdate'] =
-          animeElement.findElements('startdate').firstOrNull?.innerText;
-      data['description'] =
-          animeElement.findElements('description').firstOrNull?.innerText;
-
-      // Ratings
-      final ratings = animeElement.findElements('ratings').firstOrNull;
-      if (ratings != null) {
-        final permanent = ratings.findElements('permanent').firstOrNull;
-        if (permanent != null) {
-          data['rating'] = permanent.innerText;
-        }
-      }
-
-      // Tags (used as genres)
-      final tags = animeElement.findElements('tags').firstOrNull;
-      if (tags != null) {
-        final tagList = tags
-            .findElements('tag')
-            .map((t) => t.findElements('name').firstOrNull?.innerText)
-            .where((name) => name != null)
-            .take(5) // Limit to top 5 tags
-            .toList();
-        data['tags'] = tagList;
-      }
 
       debugPrint('✅ Fetched AniDB anime: ${data['title']}');
       return data;
@@ -339,37 +267,21 @@ class AnidbService {
   }
 
   /// Extract rating from AniDB anime data
-  /// AniDB uses a 10-point scale
   static double? extractRating(Map<String, dynamic> data) {
-    final rating = data['rating'];
-    if (rating != null) {
-      return double.tryParse(rating.toString());
-    }
-    return null;
+    return SafeParser.parseDouble(data['rating']);
   }
 
   /// Extract episode count
   static int? extractEpisodeCount(Map<String, dynamic> data) {
-    final count = data['episodecount'];
-    if (count != null) {
-      return int.tryParse(count.toString());
-    }
-    return null;
+    return SafeParser.parseInt(data['episodecount']);
   }
 
   /// Extract year from start date
   static int? extractYear(Map<String, dynamic> data) {
-    final startDate = data['startdate'];
-    if (startDate != null && startDate.toString().length >= 4) {
-      return int.tryParse(startDate.toString().substring(0, 4));
-    }
-    return null;
+    return SafeParser.parseYear(data['startdate']);
   }
 
   /// Get episode titles for an anime
-  /// AniDB doesn't use traditional "seasons" like Western TV shows
-  /// Episodes are numbered sequentially (1, 2, 3...) regardless of season
-  /// We'll map them to S01E01, S01E02, etc. format
   Future<Map<String, String>> getEpisodeLookup(
     int aid,
     List<int> seasons,
@@ -378,66 +290,43 @@ class AnidbService {
       throw Exception('AniDB client ID is required');
     }
 
-    Map<String, String> episodeMap = {};
+    final Map<String, String> episodeMap = {};
 
     try {
-      // Fetch full anime details with episodes
-      final details = await getAnimeDetails(aid);
-
-      if (details == null) {
-        return episodeMap;
-      }
-
-      // Note: The current getAnimeDetails doesn't fetch episodes
-      // We need to enhance it or make a separate call
-      // For now, we'll make a fresh call with episode data
-
       final url = Uri.parse(
         '$baseUrl?request=anime&client=$clientId&clientver=$clientVersion&protover=1&aid=$aid',
       );
 
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(_anidbDelay);
 
-      final response = await http.get(url);
+      final body = await ApiClient.getString(url);
+      if (body == null) return episodeMap;
 
-      if (response.statusCode != 200) {
-        return episodeMap;
-      }
-
-      final document = XmlDocument.parse(response.body);
+      final document = XmlDocument.parse(body);
       final animeElement = document.findElements('anime').firstOrNull;
 
-      if (animeElement == null) {
-        return episodeMap;
-      }
+      if (animeElement == null) return episodeMap;
 
-      // Extract episodes
       final episodesElement = animeElement.findElements('episodes').firstOrNull;
 
       if (episodesElement != null) {
-        final episodes = episodesElement.findElements('episode');
-
-        for (var ep in episodes) {
-          // Get episode number
+        for (var ep in episodesElement.findElements('episode')) {
           final epnoElement = ep.findElements('epno').firstOrNull;
           if (epnoElement == null) continue;
 
           final epnoText = epnoElement.innerText;
           final epType = epnoElement.getAttribute('type') ?? '1';
 
-          // Type 1 = regular episodes, 2 = special, 3 = credit, etc.
-          // We only want regular episodes for now
+          // Type 1 = regular episodes only
           if (epType != '1') continue;
 
-          // Parse episode number
-          final epNum = int.tryParse(epnoText);
+          final epNum = SafeParser.parseInt(epnoText);
           if (epNum == null) continue;
 
-          // Get episode title (prefer English, fallback to main)
+          // Get episode title (prefer English)
           final titles = ep.findElements('title');
           String? episodeTitle;
 
-          // Try English first
           for (var title in titles) {
             if (title.getAttribute('xml:lang') == 'en') {
               episodeTitle = title.innerText;
@@ -445,15 +334,10 @@ class AnidbService {
             }
           }
 
-          // Fallback to any title
-          if (episodeTitle == null && titles.isNotEmpty) {
-            episodeTitle = titles.first.innerText;
-          }
+          episodeTitle ??= titles.firstOrNull?.innerText;
 
           if (episodeTitle != null) {
-            // AniDB uses sequential numbering, map to S01E##
-            String key = "S01E$epNum";
-            episodeMap[key] = episodeTitle;
+            episodeMap["S01E$epNum"] = episodeTitle;
           }
         }
       }
@@ -467,45 +351,31 @@ class AnidbService {
   }
 
   /// Get episode lookup map from MAL using Jikan API
-  /// Returns a map of "S##E##" -> "Episode Title"
-  /// This is used for Jikan/MAL search results that don't have AniDB IDs
   Future<Map<String, String>> getEpisodeLookupFromMAL(
       int malId, List<int> seasons) async {
-    Map<String, String> episodeMap = {};
+    final Map<String, String> episodeMap = {};
 
     try {
-      // Jikan API endpoint for episodes
       final url = Uri.parse('https://api.jikan.moe/v4/anime/$malId/episodes');
 
       debugPrint('📡 Fetching episode list from MAL ID: $malId');
-
-      // Respect Jikan rate limiting - increased delay to avoid 429 errors
       await Future.delayed(const Duration(milliseconds: 1000));
 
-      final response = await http.get(url);
+      final data = await ApiClient.getJson(url);
+      if (data == null) return episodeMap;
 
-      if (response.statusCode != 200) {
-        debugPrint('⚠️ Jikan episodes API error: ${response.statusCode}');
-        return episodeMap;
-      }
-
-      final jsonData = json.decode(response.body);
-      final episodes = jsonData['data'] as List?;
-
+      final episodes = data['data'] as List?;
       if (episodes == null || episodes.isEmpty) {
         debugPrint('⚠️ No episodes found for MAL ID: $malId');
         return episodeMap;
       }
 
-      // Jikan episodes are numbered sequentially, assume S01 for all
       for (var ep in episodes) {
-        final epNum = ep['mal_id']; // Episode number
+        final epNum = ep['mal_id'];
         final title = ep['title']?.toString();
 
         if (epNum != null && title != null && title.isNotEmpty) {
-          // Map as S01E## (anime typically don't have multiple seasons in MAL numbering)
-          String key = "S01E$epNum";
-          episodeMap[key] = title;
+          episodeMap["S01E$epNum"] = title;
         }
       }
 
@@ -519,46 +389,31 @@ class AnidbService {
   }
 
   /// Get specific episode details including description from MAL
-  /// Returns: {title: ..., description: ...} or null if not found
   Future<Map<String, String>?> getEpisodeDetailsFromMAL(
     int malId,
     int episode,
   ) async {
     try {
-      // Jikan API endpoint for episodes
       final url = Uri.parse('https://api.jikan.moe/v4/anime/$malId/episodes');
 
       debugPrint(
           '📡 Fetching episode details for MAL ID: $malId, Episode: $episode');
-
-      // Respect Jikan rate limiting
       await Future.delayed(const Duration(milliseconds: 1000));
 
-      final response = await http.get(url);
+      final data = await ApiClient.getJson(url);
+      if (data == null) return null;
 
-      if (response.statusCode != 200) {
-        debugPrint('⚠️ Jikan episodes API error: ${response.statusCode}');
-        return null;
-      }
-
-      final jsonData = json.decode(response.body);
-      final episodes = jsonData['data'] as List?;
-
+      final episodes = data['data'] as List?;
       if (episodes == null || episodes.isEmpty) {
         debugPrint('⚠️ No episodes found for MAL ID: $malId');
         return null;
       }
 
-      // Find the specific episode
       for (var ep in episodes) {
-        final epNum = ep['mal_id']; // Episode number
-        if (epNum == episode) {
-          final title = ep['title']?.toString();
-          final synopsis = ep['synopsis']?.toString();
-
+        if (ep['mal_id'] == episode) {
           return {
-            'title': title ?? '',
-            'description': synopsis ?? '',
+            'title': ep['title']?.toString() ?? '',
+            'description': ep['synopsis']?.toString() ?? '',
           };
         }
       }

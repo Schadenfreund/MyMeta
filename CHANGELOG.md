@@ -23,10 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Update Service** - Complete auto-update implementation with progress tracking and UserData preservation during updates
 - **Better Error Logging** - FFprobe errors now show stderr output for easier debugging
 - **Startup Path Validation** - Tool paths validated on every app launch with auto-fix attempts
+- **App Constants Module** - New centralized constants for metadata sources, HTTP configuration, image settings, and search limits
+- **Safe Parser Utility** - Robust parsing for years, runtime, integers, doubles, and comma-separated lists with proper bounds checking
+- **HTTP Client Wrapper** - Centralized API client with 15-second timeout, retry logic, and consistent error handling
+- **MatchResult.copyWith()** - Safe method for copying MatchResult objects without losing fields
 
 ### Changed
 - **Build Script** - Now automatically reads version from `pubspec.yaml` instead of hardcoded default
 - **Tool Path Management** - More robust handling of tool paths for portable installations
+- **TMDB Service Refactored** - Now uses centralized HTTP client with timeouts and safe parsing utilities
+- **OMDB Service Refactored** - Now uses centralized HTTP client with timeouts and safe parsing utilities
+- **AniDB Service Refactored** - Now uses centralized HTTP client with timeouts, extracted XML parsing into reusable method
+
+### Improved
+- **Code Quality** - Applied DRY principles throughout codebase with shared utilities
+- **API Reliability** - All HTTP requests now have 15-second timeouts to prevent indefinite hangs
+- **Year Parsing** - Robust year extraction that handles various date formats and validates range (1888-2100)
+- **Error Handling** - Consistent null-safety patterns across all API services
 
 ## [1.0.1] - 2025-12-24
 
