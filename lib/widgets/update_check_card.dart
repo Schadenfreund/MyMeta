@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -217,6 +218,7 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
   String _status = 'Initializing...';
   bool _completed = false;
   bool _error = false;
+  UpdateService? _updateService;
 
   @override
   void initState() {
@@ -225,9 +227,9 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
   }
 
   Future<void> _performUpdate() async {
-    final updateService = UpdateService();
+    _updateService = UpdateService();
 
-    final success = await updateService.downloadAndInstall(
+    final success = await _updateService!.downloadAndInstall(
       widget.updateInfo,
       (progress, status) {
         if (mounted) {
@@ -244,6 +246,20 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
         _completed = true;
         _error = !success;
       });
+    }
+  }
+
+  Future<void> _executeUpdateAndExit() async {
+    if (_updateService?.updateScriptPath != null) {
+      // Execute the batch script
+      await Process.start(
+        'cmd.exe',
+        ['/c', _updateService!.updateScriptPath!],
+        mode: ProcessStartMode.detached,
+      );
+
+      // Exit the app - the batch script will handle the rest
+      exit(0);
     }
   }
 
@@ -272,18 +288,29 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
                 color: Colors.green, size: 48),
             const SizedBox(height: 16),
             const Text(
-              'Update installed successfully! Please restart MyMeta to use the new version.',
+              'Update downloaded successfully! Click "Restart Now" to complete the installation.',
               textAlign: TextAlign.center,
             ),
           ],
         ],
       ),
       actions: [
-        if (_completed)
+        if (_completed && !_error) ...[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Restart Later'),
+          ),
+          FilledButton.icon(
+            onPressed: _executeUpdateAndExit,
+            icon: const Icon(Icons.restart_alt),
+            label: const Text('Restart Now'),
+          ),
+        ] else if (_completed && _error) ...[
           FilledButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(_error ? 'Close' : 'Restart Later'),
+            child: const Text('Close'),
           ),
+        ],
       ],
     );
   }

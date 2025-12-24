@@ -26,17 +26,13 @@ jobs:
 
       - name: Get Dependencies
         run: flutter pub get
-        working-directory: ./simpler_filebot
 
-      - name: Build Windows Release
-        run: flutter build windows --release
-        working-directory: ./simpler_filebot
-
-      - name: Compress Build Artifacts
-        run: Compress-Archive -Path simpler_filebot\build\windows\runner\Release\* -DestinationPath simpler_filebot_windows.zip
+      - name: Build Windows Release with PowerShell Script
+        run: .\build-release.ps1
+        shell: pwsh
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-release-build
-          path: simpler_filebot_windows.zip
+          path: releases/*.zip

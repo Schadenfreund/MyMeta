@@ -11,6 +11,11 @@ class UpdateService {
   static const String repoOwner = 'Schadenfreund';
   static const String repoName = 'MyMeta';
 
+  String? _updateScriptPath;
+
+  /// Get the path to the update script (if update was downloaded)
+  String? get updateScriptPath => _updateScriptPath;
+
   /// Check if a newer version is available on GitHub
   Future<UpdateInfo?> checkForUpdates() async {
     try {
@@ -20,7 +25,10 @@ class UpdateService {
       debugPrint('🔍 Checking for updates (current: v$currentVersion)');
 
       // Fetch latest release from GitHub API
-      final dio = Dio();
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 30),
+      ));
       final response = await dio.get(
         'https://api.github.com/repos/$repoOwner/$repoName/releases/latest',
       );
@@ -60,7 +68,10 @@ class UpdateService {
     try {
       onProgress(0.0, 'Preparing download...');
 
-      final dio = Dio();
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(minutes: 5),
+      ));
       final tempDir = await Directory.systemTemp.createTemp('mymeta_update_');
       final zipPath = p.join(tempDir.path, 'update.zip');
 
@@ -104,26 +115,27 @@ class UpdateService {
         }
       }
 
-      onProgress(0.7, 'Installing update...');
-      debugPrint('🔧 Replacing app files...');
+      onProgress(0.7, 'Preparing update...');
+      debugPrint('🔧 Preparing update installation...');
 
-      // Get current app directory
-      final currentDir = Directory.current.path;
+      // Get current app directory from executable path (works for portable apps)
+      final exePath = Platform.resolvedExecutable;
+      final currentDir = p.dirname(exePath);
+      debugPrint('📁 App directory: $currentDir');
 
-      // Replace files (preserving UserData)
-      await _replaceAppFiles(extractPath, currentDir);
+      // Create update batch script
+      final batchScriptPath = await _createUpdateScript(
+        extractPath,
+        currentDir,
+        p.basename(exePath),
+      );
 
-      onProgress(0.9, 'Cleaning up...');
+      onProgress(0.9, 'Update ready!');
+      debugPrint('✅ Update staged successfully!');
+      debugPrint('📜 Update script: $batchScriptPath');
 
-      // Cleanup
-      try {
-        await tempDir.delete(recursive: true);
-      } catch (e) {
-        debugPrint('⚠️  Could not delete temp files: $e');
-      }
-
-      onProgress(1.0, 'Update complete!');
-      debugPrint('✅ Update installed successfully!');
+      // Store the script path for the UI to execute after user confirmation
+      _updateScriptPath = batchScriptPath;
 
       return true;
     } catch (e) {
@@ -132,60 +144,77 @@ class UpdateService {
     }
   }
 
-  /// Replace app files while preserving UserData
-  Future<void> _replaceAppFiles(String sourcePath, String targetPath) async {
-    // Files/folders to replace
-    final toReplace = ['MyMeta.exe', 'data'];
+  /// Create a batch script that will perform the update after the app closes
+  Future<String> _createUpdateScript(
+    String sourcePath,
+    String targetPath,
+    String exeName,
+  ) async {
+    final scriptPath = p.join(targetPath, 'update_mymeta.bat');
 
-    // Also copy all DLLs
-    final sourceDir = Directory(sourcePath);
-    await for (final file in sourceDir.list()) {
-      if (file is File && file.path.endsWith('.dll')) {
-        final targetFile = p.join(targetPath, p.basename(file.path));
-        await file.copy(targetFile);
-      }
-    }
+    // Create batch script content
+    final script = '''
+@echo off
+echo MyMeta Auto-Update Script
+echo =============================
+echo.
+echo Waiting for MyMeta to close...
+timeout /t 2 /nobreak >nul
 
-    // Copy main files and folders
-    for (final item in toReplace) {
-      final source = p.join(sourcePath, item);
-      final target = p.join(targetPath, item);
+:wait_for_close
+tasklist /FI "IMAGENAME eq $exeName" 2>NUL | find /I "$exeName" >NUL
+if "%ERRORLEVEL%"=="0" (
+    timeout /t 1 /nobreak >nul
+    goto wait_for_close
+)
 
-      if (await FileSystemEntity.isDirectory(source)) {
-        // Delete old directory and copy new one
-        if (await Directory(target).exists()) {
-          await Directory(target).delete(recursive: true);
-        }
-        await _copyDirectory(Directory(source), Directory(target));
-      } else if (await File(source).exists()) {
-        // Copy file
-        await File(source).copy(target);
-      }
-    }
+echo.
+echo Installing update...
 
-    debugPrint('✅ App files replaced (UserData preserved)');
-  }
+REM Copy new EXE
+echo - Updating MyMeta.exe...
+xcopy /Y /Q "$sourcePath\\$exeName" "$targetPath\\" >nul
 
-  /// Recursively copy directory
-  Future<void> _copyDirectory(Directory source, Directory target) async {
-    await target.create(recursive: true);
-    await for (final entity in source.list(recursive: false)) {
-      if (entity is File) {
-        await entity.copy(p.join(target.path, p.basename(entity.path)));
-      } else if (entity is Directory) {
-        await _copyDirectory(
-          entity,
-          Directory(p.join(target.path, p.basename(entity.path))),
-        );
-      }
-    }
+REM Copy all DLLs
+echo - Updating DLLs...
+xcopy /Y /Q "$sourcePath\\*.dll" "$targetPath\\" >nul
+
+REM Copy data folder
+echo - Updating data folder...
+if exist "$targetPath\\data" rmdir /S /Q "$targetPath\\data"
+xcopy /E /I /Y /Q "$sourcePath\\data" "$targetPath\\data" >nul
+
+echo.
+echo Update complete!
+echo Restarting MyMeta...
+timeout /t 1 /nobreak >nul
+
+REM Restart the app
+start "" "$targetPath\\$exeName"
+
+REM Clean up (delete this script)
+timeout /t 1 /nobreak >nul
+del "%~f0"
+''';
+
+    // Write script to file
+    final scriptFile = File(scriptPath);
+    await scriptFile.writeAsString(script);
+
+    debugPrint('📜 Update script created at: $scriptPath');
+    return scriptPath;
   }
 
   /// Compare version strings (semantic versioning)
+  /// Handles version strings with suffixes like "1.0.2-release" or "1.0.2-beta"
   bool _isNewerVersion(String current, String latest) {
     try {
-      final currentParts = current.split('.').map(int.parse).toList();
-      final latestParts = latest.split('.').map(int.parse).toList();
+      // Extract only the numeric parts (strip any suffix like "-release", "-beta", etc.)
+      final currentClean = _extractSemanticVersion(current);
+      final latestClean = _extractSemanticVersion(latest);
+
+      final currentParts = currentClean.split('.').map(int.parse).toList();
+      final latestParts = latestClean.split('.').map(int.parse).toList();
 
       for (int i = 0; i < 3; i++) {
         if (latestParts[i] > currentParts[i]) return true;
@@ -198,15 +227,34 @@ class UpdateService {
     }
   }
 
+  /// Extract the semantic version (X.Y.Z) from a version string
+  /// Handles: "1.0.2", "1.0.2-release", "1.0.2-beta.1", etc.
+  String _extractSemanticVersion(String version) {
+    // Match pattern like "1.0.2" at the start (optionally followed by dash and suffix)
+    final regex = RegExp(r'^(\d+\.\d+\.\d+)');
+    final match = regex.firstMatch(version);
+    if (match != null) {
+      return match.group(1)!;
+    }
+    return version; // Fallback to original if no match
+  }
+
   /// Extract Windows asset URL from GitHub release assets
   String _getWindowsAssetUrl(List assets) {
+    debugPrint('🔍 Searching for Windows asset in ${assets.length} assets');
+
     for (final asset in assets) {
       final name = asset['name'] as String;
+      debugPrint('  - Found asset: $name');
       if (name.contains('windows') && name.endsWith('.zip')) {
+        debugPrint('✅ Using Windows asset: $name');
         return asset['browser_download_url'] as String;
       }
     }
-    throw Exception('No Windows release found in assets');
+
+    debugPrint('❌ No Windows release found in assets');
+    throw Exception(
+        'No Windows release found. Available assets: ${assets.map((a) => a['name']).join(', ')}');
   }
 }
 
