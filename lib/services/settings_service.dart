@@ -152,6 +152,170 @@ class SettingsService with ChangeNotifier {
     }
   }
 
+  /// Validate and fix tool paths (for portable app - critical on startup)
+  /// This ensures paths are still valid after app is moved
+  Future<void> validateAndFixToolPaths() async {
+    debugPrint('🔍 Validating tool paths...');
+
+    final pathsToValidate = {
+      'FFmpeg': _ffmpegPath,
+      'mkvpropedit': _mkvpropeditPath,
+      'AtomicParsley': _atomicparsleyPath,
+    };
+
+    final List<String> invalidTools = [];
+    final List<String> fixedTools = [];
+
+    for (final entry in pathsToValidate.entries) {
+      final toolName = entry.key;
+      final savedPath = entry.value;
+
+      if (savedPath.isEmpty) continue; // No path saved, skip
+
+      // Check if saved path still exists
+      if (!Directory(savedPath).existsSync()) {
+        debugPrint('⚠️  Saved path for $toolName no longer exists: $savedPath');
+        invalidTools.add(toolName);
+
+        // Try to auto-fix by finding in UserData/tools
+        final fixAttempted =
+            await _tryAutoFixInvalidPath(toolName.toLowerCase());
+        if (fixAttempted) {
+          fixedTools.add(toolName);
+          debugPrint('✅ Auto-fixed $toolName path');
+        } else {
+          // Clear invalid path
+          if (toolName == 'FFmpeg') {
+            _ffmpegPath = '';
+            _isFFmpegAvailable = false;
+          } else if (toolName == 'mkvpropedit') {
+            _mkvpropeditPath = '';
+            _isMkvpropeditAvailable = false;
+          } else if (toolName == 'AtomicParsley') {
+            _atomicparsleyPath = '';
+            _isAtomicParsleyAvailable = false;
+          }
+          debugPrint('❌ Cleared invalid path for $toolName');
+        }
+      } else {
+        // Path exists, but verify the actual executable is there
+        final exeName = toolName == 'mkvpropedit'
+            ? 'mkvpropedit.exe'
+            : '${toolName.toLowerCase()}.exe';
+        final directExe = p.join(savedPath, exeName);
+        final binExe = p.join(savedPath, 'bin', exeName);
+
+        if (!File(directExe).existsSync() && !File(binExe).existsSync()) {
+          // Path exists but executable not found
+          debugPrint('⚠️  Path exists but $exeName not found in: $savedPath');
+          invalidTools.add(toolName);
+
+          // Try auto-fix
+          final fixAttempted =
+              await _tryAutoFixInvalidPath(toolName.toLowerCase());
+          if (!fixAttempted) {
+            // Clear path if can't fix
+            if (toolName == 'FFmpeg') {
+              _ffmpegPath = '';
+              _isFFmpegAvailable = false;
+            } else if (toolName == 'mkvpropedit') {
+              _mkvpropeditPath = '';
+              _isMkvpropeditAvailable = false;
+            } else if (toolName == 'AtomicParsley') {
+              _atomicparsleyPath = '';
+              _isAtomicParsleyAvailable = false;
+            }
+            debugPrint('❌ Cleared invalid path for $toolName');
+          }
+        }
+      }
+    }
+
+    // Save if any paths were cleared or fixed
+    if (invalidTools.isNotEmpty) {
+      await _saveSettings();
+      debugPrint('💾 Saved updated tool paths');
+
+      // Log summary
+      if (fixedTools.isNotEmpty) {
+        debugPrint('✅ Auto-fixed tools: ${fixedTools.join(", ")}');
+      }
+
+      final stillInvalid =
+          invalidTools.where((t) => !fixedTools.contains(t)).toList();
+      if (stillInvalid.isNotEmpty) {
+        debugPrint(
+            '⚠️  Tools need reconfiguration: ${stillInvalid.join(", ")}');
+        debugPrint('   Please configure tools in Settings if needed');
+      }
+    } else {
+      debugPrint('✅ All tool paths valid');
+    }
+  }
+
+  /// Try to auto-fix an invalid tool path by searching UserData/tools
+  Future<bool> _tryAutoFixInvalidPath(String toolName) async {
+    try {
+      final userDataPath = await _getUserDataPath();
+      final toolsDir = p.join(userDataPath, 'tools');
+
+      String subDir = '';
+      if (toolName == 'ffmpeg')
+        subDir = 'ffmpeg';
+      else if (toolName == 'mkvpropedit')
+        subDir = 'mkvtoolnix';
+      else if (toolName == 'atomicparsley') subDir = 'atomicparsley';
+
+      final subDirPath = p.join(toolsDir, subDir);
+      final subDirectory = Directory(subDirPath);
+
+      if (!subDirectory.existsSync()) return false;
+
+      // Find the executable
+      String? foundPath;
+
+      // 1. Direct
+      if (File(p.join(subDirPath, '$toolName.exe')).existsSync()) {
+        foundPath = subDirPath;
+      }
+      // 2. Bin
+      else if (File(p.join(subDirPath, 'bin', '$toolName.exe')).existsSync()) {
+        foundPath = p.join(subDirPath, 'bin');
+      }
+      // 3. Recursive
+      else {
+        try {
+          final entities = subDirectory.listSync(recursive: true);
+          for (var entity in entities) {
+            if (entity is File &&
+                p.basename(entity.path).toLowerCase() ==
+                    '$toolName.exe'.toLowerCase()) {
+              foundPath = p.dirname(entity.path);
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (foundPath != null) {
+        if (toolName == 'ffmpeg') {
+          _ffmpegPath = foundPath;
+          _isFFmpegAvailable = true;
+        } else if (toolName == 'mkvpropedit') {
+          _mkvpropeditPath = foundPath;
+          _isMkvpropeditAvailable = true;
+        } else if (toolName == 'atomicparsley') {
+          _atomicparsleyPath = foundPath;
+          _isAtomicParsleyAvailable = true;
+        }
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Error trying to auto-fix $toolName: $e');
+    }
+    return false;
+  }
+
   Future<void> _saveSettings() async {
     try {
       final settingsFile = await _getSettingsFile();

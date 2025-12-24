@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Critical: Metadata Reading on Paths with Spaces** - Fixed FFprobe failing to read embedded metadata when project/file paths contain spaces (like "My Drive"). Changed `runInShell` from `true` to `false` to properly handle paths with spaces. Metadata now correctly persists after embedding and can be read on re-import.
-- **Auto-Update System** - Configured GitHub repository information (Schadenfreund/MyMeta) for automatic update checks
+- **Portable App Tool Path Validation** - Added startup validation that checks if saved tool paths are still valid after the app is moved. Automatically attempts to fix paths by searching `UserData/tools`. Clears invalid paths and provides detailed logging. Critical for portable app reliability.
 
 ### Added
 - **Auto-Update Feature** - Added "Software Updates" card in Settings that checks GitHub Releases for new versions
-- **Update Service** - Complete auto-update implementation with progress tracking and UserData preservation
+- **Update Service** - Complete auto-update implementation with progress tracking and UserData preservation during updates
 - **Better Error Logging** - FFprobe errors now show stderr output for easier debugging
+- **Startup Path Validation** - Tool paths validated on every app launch with auto-fix attempts
+
+### Changed
+- **Build Script** - Now automatically reads version from `pubspec.yaml` instead of hardcoded default
+- **Tool Path Management** - More robust handling of tool paths for portable installations
 
 ## [1.0.1] - 2025-12-24
 

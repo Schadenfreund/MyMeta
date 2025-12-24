@@ -13,6 +13,9 @@ void main() async {
   final settingsService = SettingsService();
   await settingsService.loadSettings();
 
+  // Validate and fix tool paths (critical for portable app)
+  await settingsService.validateAndFixToolPaths();
+
   WindowOptions windowOptions = const WindowOptions(
     size: Size(1000, 700),
     center: true,
