@@ -37,10 +37,33 @@ MyMeta needs API keys to fetch metadata. Both are **free** and take 2 minutes to
 4. Check your email for the API key
 
 #### **AniDB Client ID** (Optional - For Anime)
-1. Go to [wiki.anidb.net/API](https://wiki.anidb.net/API)
-2. Register for API access
-3. Follow instructions to get your Client ID
-4. Note: AniDB has strict rate limits
+
+AniDB is perfect for anime metadata. Setup takes 5 minutes:
+
+1. **Create AniDB Account**
+   - Go to [anidb.net](https://anidb.net)
+   - Create a free account and log in
+
+2. **Register API Client**
+   - Visit [http://anidb.net/perl-bin/animedb.pl?show=client](http://anidb.net/perl-bin/animedb.pl?show=client)
+   - Click **"Add New Project"**
+   - Give your project any name (e.g., "MyMeta")
+   - Other fields don't matter - just fill them in
+
+3. **Create API Version**
+   - Inside your project, click **"Add New Version"**
+   - Enter a version name (e.g., "mymeta" or "client1")
+   - Set version number to **1**
+   - **Important:** The version name = your "Client ID"
+
+4. **Add to MyMeta**
+   - In MyMeta Settings, paste the **version name** as "AniDB Client ID"
+   - Leave version at 1 (or use what you set)
+
+**Note:** AniDB has rate limits (2 requests/second). MyMeta handles this automatically.
+
+**Bonus:** MyMeta also uses Jikan (MyAnimeList) for anime search, which works without any API key!
+
 
 ### **Adding Keys to MyMeta**
 1. Open MyMeta

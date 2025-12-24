@@ -52,4 +52,5 @@ assets/*.exe
 
 # User data
 UserData/
+API.txt
 

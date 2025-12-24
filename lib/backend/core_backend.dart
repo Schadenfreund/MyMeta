@@ -13,7 +13,9 @@ import 'package:http/http.dart' as http;
 
 class CoreBackend {
   static String createFormattedTitle(
-      String template, Map<String, dynamic> context) {
+    String template,
+    Map<String, dynamic> context,
+  ) {
     // Basic substitution: {series_name}, {year}, {season_number}, {episode_number}, {episode_title}
     String result = template;
     context.forEach((key, value) {
@@ -74,8 +76,10 @@ class CoreBackend {
                   actors = TmdbService.extractCast(details);
                   description = details['overview'] ?? description;
                   rating = details['vote_average']?.toDouble() ?? rating;
-                  contentRating =
-                      TmdbService.extractContentRating(details, false);
+                  contentRating = TmdbService.extractContentRating(
+                    details,
+                    false,
+                  );
                   runtime = details['runtime'];
                 }
 
@@ -86,25 +90,28 @@ class CoreBackend {
               }
             }
 
-            results.add(MatchResult(
-              newName: result['title'] ?? 'Unknown',
-              posterUrl: posterUrl,
-              title: result['title'],
-              year: result['release_date'] != null &&
-                      result['release_date'].length >= 4
-                  ? int.tryParse(result['release_date'].substring(0, 4))
-                  : null,
-              type: 'movie',
-              description: description,
-              genres: genres,
-              director: director,
-              actors: actors,
-              rating: rating,
-              contentRating: contentRating,
-              runtime: runtime,
-              tmdbId: movieId,
-              alternativePosterUrls: alternativePosters,
-            ));
+            results.add(
+              MatchResult(
+                newName: result['title'] ?? 'Unknown',
+                posterUrl: posterUrl,
+                title: result['title'],
+                year:
+                    result['release_date'] != null &&
+                        result['release_date'].length >= 4
+                    ? int.tryParse(result['release_date'].substring(0, 4))
+                    : null,
+                type: 'movie',
+                description: description,
+                genres: genres,
+                director: director,
+                actors: actors,
+                rating: rating,
+                contentRating: contentRating,
+                runtime: runtime,
+                tmdbId: movieId,
+                alternativePosterUrls: alternativePosters,
+              ),
+            );
           }
         } else {
           // Search for TV shows and fetch full details for each
@@ -137,8 +144,10 @@ class CoreBackend {
                   actors = TmdbService.extractCast(details);
                   description = details['overview'] ?? description;
                   rating = details['vote_average']?.toDouble() ?? rating;
-                  contentRating =
-                      TmdbService.extractContentRating(details, true);
+                  contentRating = TmdbService.extractContentRating(
+                    details,
+                    true,
+                  );
                 }
 
                 // Fetch alternative posters
@@ -147,23 +156,28 @@ class CoreBackend {
                 // Fetch specific episode title if season/episode provided
                 if (season != null && episode != null) {
                   debugPrint(
-                      '🔎 Fetching episode title for S${season}E${episode} from TMDB show $tvId');
+                    '🔎 Fetching episode title for S${season}E${episode} from TMDB show $tvId',
+                  );
                   try {
-                    final episodeLookup =
-                        await tmdb.getEpisodeLookup(tvId, [season]);
+                    final episodeLookup = await tmdb.getEpisodeLookup(tvId, [
+                      season,
+                    ]);
                     String key = "S${season}E${episode}";
                     if (episodeLookup.containsKey(key)) {
                       fetchedEpisodeTitle = episodeLookup[key];
                       debugPrint(
-                          '✅ Fetched episode title for $key: $fetchedEpisodeTitle');
+                        '✅ Fetched episode title for $key: $fetchedEpisodeTitle',
+                      );
                     } else {
                       debugPrint(
-                          '⚠️ Show "${result['name']}" doesn\'t have $key - skipping');
+                        '⚠️ Show "${result['name']}" doesn\'t have $key - skipping',
+                      );
                       continue; // Skip this show - it doesn't have this episode
                     }
                   } catch (e) {
                     debugPrint(
-                        'Error fetching episode title: $e - skipping show');
+                      'Error fetching episode title: $e - skipping show',
+                    );
                     continue; // Skip on error too
                   }
                 }
@@ -173,26 +187,29 @@ class CoreBackend {
               }
             }
 
-            results.add(MatchResult(
-              newName: result['name'] ?? 'Unknown',
-              posterUrl: posterUrl,
-              title: result['name'],
-              year: result['first_air_date'] != null &&
-                      result['first_air_date'].length >= 4
-                  ? int.tryParse(result['first_air_date'].substring(0, 4))
-                  : null,
-              season: season,
-              episode: episode,
-              episodeTitle: fetchedEpisodeTitle,
-              type: 'episode',
-              description: description,
-              genres: genres,
-              actors: actors,
-              rating: rating,
-              contentRating: contentRating,
-              tmdbId: tvId,
-              alternativePosterUrls: alternativePosters,
-            ));
+            results.add(
+              MatchResult(
+                newName: result['name'] ?? 'Unknown',
+                posterUrl: posterUrl,
+                title: result['name'],
+                year:
+                    result['first_air_date'] != null &&
+                        result['first_air_date'].length >= 4
+                    ? int.tryParse(result['first_air_date'].substring(0, 4))
+                    : null,
+                season: season,
+                episode: episode,
+                episodeTitle: fetchedEpisodeTitle,
+                type: 'episode',
+                description: description,
+                genres: genres,
+                actors: actors,
+                rating: rating,
+                contentRating: contentRating,
+                tmdbId: tvId,
+                alternativePosterUrls: alternativePosters,
+              ),
+            );
           }
         }
       } else if (source == 'omdb') {
@@ -208,8 +225,8 @@ class CoreBackend {
             // Basic info from search
             String? posterUrl =
                 result['Poster'] != null && result['Poster'] != 'N/A'
-                    ? result['Poster']
-                    : null;
+                ? result['Poster']
+                : null;
 
             // Variables for detailed metadata
             List<String>? genres;
@@ -236,29 +253,33 @@ class CoreBackend {
                 }
               } catch (e) {
                 debugPrint(
-                    'Error fetching movie details for IMDb ID $imdbId: $e');
+                  'Error fetching movie details for IMDb ID $imdbId: $e',
+                );
               }
             }
 
-            results.add(MatchResult(
-              newName: result['Title'] ?? 'Unknown',
-              posterUrl: posterUrl,
-              title: result['Title'],
-              year: result['Year'] != null && result['Year'].length >= 4
-                  ? int.tryParse(
-                      RegExp(r'\d{4}').firstMatch(result['Year'])?.group(0) ??
-                          '')
-                  : null,
-              type: 'movie',
-              description: description,
-              genres: genres,
-              director: director,
-              actors: actors,
-              rating: rating,
-              contentRating: contentRating,
-              runtime: runtime,
-              imdbId: imdbId,
-            ));
+            results.add(
+              MatchResult(
+                newName: result['Title'] ?? 'Unknown',
+                posterUrl: posterUrl,
+                title: result['Title'],
+                year: result['Year'] != null && result['Year'].length >= 4
+                    ? int.tryParse(
+                        RegExp(r'\d{4}').firstMatch(result['Year'])?.group(0) ??
+                            '',
+                      )
+                    : null,
+                type: 'movie',
+                description: description,
+                genres: genres,
+                director: director,
+                actors: actors,
+                rating: rating,
+                contentRating: contentRating,
+                runtime: runtime,
+                imdbId: imdbId,
+              ),
+            );
           }
         } else {
           // Search for TV shows and fetch full details for each
@@ -270,8 +291,8 @@ class CoreBackend {
             // Basic info from search
             String? posterUrl =
                 result['Poster'] != null && result['Poster'] != 'N/A'
-                    ? result['Poster']
-                    : null;
+                ? result['Poster']
+                : null;
 
             // Variables for detailed metadata
             List<String>? genres;
@@ -298,71 +319,154 @@ class CoreBackend {
                 // Fetch specific episode title if season/episode provided
                 if (season != null && episode != null) {
                   debugPrint(
-                      '🔎 Fetching episode title for S${season}E${episode} from OMDb series $imdbId');
+                    '🔎 Fetching episode title for S${season}E${episode} from OMDb series $imdbId',
+                  );
                   try {
-                    final episodeLookup =
-                        await omdb.getEpisodeLookup(imdbId, [season]);
+                    final episodeLookup = await omdb.getEpisodeLookup(imdbId, [
+                      season,
+                    ]);
                     String key = "S${season}E${episode}";
                     if (episodeLookup.containsKey(key)) {
                       fetchedEpisodeTitle = episodeLookup[key];
                       debugPrint(
-                          '✅ Fetched episode title for $key: $fetchedEpisodeTitle');
+                        '✅ Fetched episode title for $key: $fetchedEpisodeTitle',
+                      );
                     } else {
                       debugPrint(
-                          '⚠️ Show "${result['Title']}" doesn\'t have $key - skipping');
+                        '⚠️ Show "${result['Title']}" doesn\'t have $key - skipping',
+                      );
                       continue; // Skip this show - it doesn't have this episode
                     }
                   } catch (e) {
                     debugPrint(
-                        'Error fetching episode title: $e - skipping show');
+                      'Error fetching episode title: $e - skipping show',
+                    );
                     continue; // Skip on error too
                   }
                 }
               } catch (e) {
                 debugPrint(
-                    'Error fetching series details for IMDb ID $imdbId: $e');
+                  'Error fetching series details for IMDb ID $imdbId: $e',
+                );
                 continue; // Skip this result
               }
             }
 
-            results.add(MatchResult(
-              newName: result['Title'] ?? 'Unknown',
-              posterUrl: posterUrl,
-              title: result['Title'],
-              year: result['Year'] != null && result['Year'].length >= 4
-                  ? int.tryParse(
-                      RegExp(r'\d{4}').firstMatch(result['Year'])?.group(0) ??
-                          '')
-                  : null,
-              season: season,
-              episode: episode,
-              episodeTitle: fetchedEpisodeTitle,
-              type: 'episode',
-              description: description,
-              genres: genres,
-              actors: actors,
-              rating: rating,
-              contentRating: contentRating,
-              imdbId: imdbId,
-            ));
+            results.add(
+              MatchResult(
+                newName: result['Title'] ?? 'Unknown',
+                posterUrl: posterUrl,
+                title: result['Title'],
+                year: result['Year'] != null && result['Year'].length >= 4
+                    ? int.tryParse(
+                        RegExp(r'\d{4}').firstMatch(result['Year'])?.group(0) ??
+                            '',
+                      )
+                    : null,
+                season: season,
+                episode: episode,
+                episodeTitle: fetchedEpisodeTitle,
+                type: 'episode',
+                description: description,
+                genres: genres,
+                actors: actors,
+                rating: rating,
+                contentRating: contentRating,
+                imdbId: imdbId,
+              ),
+            );
           }
         }
       } else if (source == 'anidb') {
-        // AniDB search - primarily for anime content
+        // AniDB/MAL search - primarily for anime content
         final anidb = AnidbService(apiKey);
 
-        // Note: AniDB API returns XML and needs proper parsing implementation
-        // For now, this returns empty results
-        debugPrint(
-            '⚠️ AniDB search selected but XML parsing not yet implemented');
-        debugPrint('   Please implement XML parsing in anidb_service.dart');
+        // Search using hybrid approach (AniDB + Jikan/MAL)
+        final allResults = await anidb.searchAnimeAll(title);
 
-        // Placeholder for when AniDB is fully implemented
-        try {
-          await anidb.searchAnimeAll(title);
-          // When implemented, process results here similar to TMDB/OMDb
-        } catch (e) {
-          debugPrint('AniDB search error: $e');
+        for (var result in allResults) {
+          // Basic info from search
+          String? posterUrl = result['poster_url'];
+          String? resultTitle = result['title'];
+          String? description = result['description'];
+
+          // Extract year from startdate
+          int? year;
+          final startDate = result['startdate'];
+          if (startDate != null && startDate.toString().length >= 4) {
+            year = int.tryParse(startDate.toString().substring(0, 4));
+          }
+
+          // Extract rating (AniDB uses 10-point scale, MAL also uses 10-point)
+          double? rating;
+          final ratingStr = result['rating'];
+          if (ratingStr != null) {
+            rating = double.tryParse(ratingStr.toString());
+          }
+
+          // Extract episode count
+          int? episodeCount;
+          final epCountStr = result['episodecount'];
+          if (epCountStr != null) {
+            episodeCount = int.tryParse(epCountStr.toString());
+          }
+
+          // For now, treat all anime as TV series
+          // AniDB type field includes: TV Series, Movie, OVA, Web, etc.
+          String type = isMovie ? 'movie' : 'episode';
+
+          // Variables for episode-specific data
+          String? fetchedEpisodeTitle = episodeTitle;
+
+          // If we have season/episode info and this is from AniDB (has AID)
+          if (!isMovie &&
+              season != null &&
+              episode != null &&
+              result['aid'] != null) {
+            try {
+              final aid = result['aid'] as int;
+              final episodeLookup = await anidb.getEpisodeLookup(aid, [season]);
+              String key = "S${season}E${episode}";
+              if (episodeLookup.containsKey(key)) {
+                fetchedEpisodeTitle = episodeLookup[key];
+                debugPrint(
+                  '✅ Fetched episode title for $key: $fetchedEpisodeTitle',
+                );
+              } else {
+                debugPrint(
+                  '⚠️ Anime "${resultTitle}" doesn\'t have $key - skipping',
+                );
+                continue; // Skip this anime
+              }
+            } catch (e) {
+              debugPrint('Error fetching episode title: $e - skipping');
+              continue;
+            }
+          }
+
+          results.add(
+            MatchResult(
+              newName: resultTitle ?? 'Unknown',
+              posterUrl: posterUrl,
+              title: resultTitle,
+              year: year,
+              season: !isMovie ? season : null,
+              episode: !isMovie ? episode : null,
+              episodeTitle: !isMovie ? fetchedEpisodeTitle : null,
+              type: type,
+              description: description,
+              genres: result['tags'] != null
+                  ? List<String>.from(result['tags'])
+                  : null,
+              rating: rating,
+              runtime:
+                  episodeCount, // Store episode count in runtime field for now
+              // Store source-specific IDs
+              tmdbId: null,
+              imdbId: null,
+              // Note: We could add anidbId and malId fields to MatchResult if needed
+            ),
+          );
         }
       }
     } catch (e) {
@@ -445,40 +549,39 @@ class CoreBackend {
             "year": bestMatch.year,
             "season_number": record.season?.toString().padLeft(2, '0'),
             "episode_number": record.episode?.toString().padLeft(2, '0'),
-            "episode_title": bestMatch.episodeTitle ?? "Title"
+            "episode_title": bestMatch.episodeTitle ?? "Title",
           };
         } else {
-          context = {
-            "movie_name": bestMatch.title,
-            "year": bestMatch.year,
-          };
+          context = {"movie_name": bestMatch.title, "year": bestMatch.year};
         }
 
         // Create the final match result with formatted name and all search results
-        results.add(MatchResult(
-          newName:
-              "${createFormattedTitle(format, context)}.${record.container}",
-          posterUrl: bestMatch.posterUrl,
-          title: bestMatch.title,
-          year: bestMatch.year,
-          season: bestMatch.season,
-          episode: bestMatch.episode,
-          episodeTitle: bestMatch.episodeTitle,
-          type: bestMatch.type,
-          description: bestMatch.description,
-          genres: bestMatch.genres,
-          director: bestMatch.director,
-          actors: bestMatch.actors,
-          rating: bestMatch.rating,
-          contentRating: bestMatch.contentRating,
-          runtime: bestMatch.runtime,
-          studio: bestMatch.studio,
-          tmdbId: bestMatch.tmdbId,
-          imdbId: bestMatch.imdbId,
-          alternativePosterUrls: bestMatch.alternativePosterUrls,
-          searchResults: searchResults, // All results for fix match modal
-          coverBytes: null, // Will be downloaded separately if needed
-        ));
+        results.add(
+          MatchResult(
+            newName:
+                "${createFormattedTitle(format, context)}.${record.container}",
+            posterUrl: bestMatch.posterUrl,
+            title: bestMatch.title,
+            year: bestMatch.year,
+            season: bestMatch.season,
+            episode: bestMatch.episode,
+            episodeTitle: bestMatch.episodeTitle,
+            type: bestMatch.type,
+            description: bestMatch.description,
+            genres: bestMatch.genres,
+            director: bestMatch.director,
+            actors: bestMatch.actors,
+            rating: bestMatch.rating,
+            contentRating: bestMatch.contentRating,
+            runtime: bestMatch.runtime,
+            studio: bestMatch.studio,
+            tmdbId: bestMatch.tmdbId,
+            imdbId: bestMatch.imdbId,
+            alternativePosterUrls: bestMatch.alternativePosterUrls,
+            searchResults: searchResults, // All results for fix match modal
+            coverBytes: null, // Will be downloaded separately if needed
+          ),
+        );
 
         debugPrint('✅ Matched: ${record.title} -> ${bestMatch.title}');
       } catch (e) {
@@ -488,13 +591,16 @@ class CoreBackend {
     }
 
     debugPrint(
-        '📦 Batch matching complete: ${results.length}/${records.length} matched');
+      '📦 Batch matching complete: ${results.length}/${records.length} matched',
+    );
     return results;
   }
 
   /// Perform batch file renaming
   static void performFileRenaming(
-      List<String> oldPaths, List<String> newNames) {
+    List<String> oldPaths,
+    List<String> newNames,
+  ) {
     for (int i = 0; i < oldPaths.length; i++) {
       String oldPath = oldPaths[i];
       String newPath = p.join(p.dirname(oldPath), newNames[i]);
@@ -601,8 +707,13 @@ class CoreBackend {
         userDataSubDir = toolNameLower;
       }
 
-      final userDataTool =
-          p.join(exeDir, 'UserData', 'tools', userDataSubDir, '$toolName.exe');
+      final userDataTool = p.join(
+        exeDir,
+        'UserData',
+        'tools',
+        userDataSubDir,
+        '$toolName.exe',
+      );
       if (File(userDataTool).existsSync()) {
         debugPrint('✅ Using UserData $toolName: $userDataTool');
         return userDataTool;
@@ -647,14 +758,16 @@ class CoreBackend {
   }
 
   /// Resolve mkvpropedit path (custom → bundled → PATH)
-  static Future<String?> _resolveMkvpropedit(
-      {SettingsService? settings}) async {
+  static Future<String?> _resolveMkvpropedit({
+    SettingsService? settings,
+  }) async {
     return _resolveToolPath('mkvpropedit', settings?.mkvpropeditPath);
   }
 
   /// Resolve AtomicParsley path (custom → bundled → PATH)
-  static Future<String?> _resolveAtomicParsley(
-      {SettingsService? settings}) async {
+  static Future<String?> _resolveAtomicParsley({
+    SettingsService? settings,
+  }) async {
     return _resolveToolPath('AtomicParsley', settings?.atomicparsleyPath);
   }
 
@@ -670,8 +783,10 @@ class CoreBackend {
   }
 
   /// Read existing metadata from a media file using FFprobe
-  static Future<MatchResult?> readMetadata(String filePath,
-      {SettingsService? settings}) async {
+  static Future<MatchResult?> readMetadata(
+    String filePath, {
+    SettingsService? settings,
+  }) async {
     debugPrint("\n" + "=" * 60);
     debugPrint("📖 READING METADATA: ${p.basename(filePath)}");
     debugPrint("=" * 60);
@@ -733,7 +848,8 @@ class CoreBackend {
     if (ffprobePath == null) {
       ffprobePath = 'ffprobe';
       debugPrint(
-          '⚠️  FFprobe not found in custom/bundled paths, trying system PATH...');
+        '⚠️  FFprobe not found in custom/bundled paths, trying system PATH...',
+      );
     }
 
     // Run FFprobe to get metadata
@@ -786,7 +902,8 @@ class CoreBackend {
         year = int.tryParse(yearStr.toString().substring(0, 4));
       }
 
-      String? description = tags['comment'] ??
+      String? description =
+          tags['comment'] ??
           tags['description'] ??
           tags['synopsis'] ??
           tags['COMMENT'] ??
@@ -796,7 +913,8 @@ class CoreBackend {
       String? genre = tags['genre'] ?? tags['GENRE'];
       List<String>? genres = genre?.split(',').map((e) => e.trim()).toList();
 
-      String? director = tags['director'] ??
+      String? director =
+          tags['director'] ??
           tags['artist'] ??
           tags['DIRECTOR'] ??
           tags['ARTIST'];
@@ -814,7 +932,8 @@ class CoreBackend {
       String? contentRating = tags['content_rating'] ?? tags['CONTENT_RATING'];
 
       // TV Show metadata - check MANY variations!
-      String? show = tags['show'] ??
+      String? show =
+          tags['show'] ??
           tags['SHOW'] ??
           tags['series'] ??
           tags['SERIES'] ??
@@ -822,7 +941,8 @@ class CoreBackend {
           tags['ALBUM'];
 
       // Season - check multiple possible names
-      String? seasonStr = tags['season_number'] ??
+      String? seasonStr =
+          tags['season_number'] ??
           tags['SEASON_NUMBER'] ??
           tags['season'] ??
           tags['SEASON'] ??
@@ -834,7 +954,8 @@ class CoreBackend {
       }
 
       // Episode - check multiple possible names
-      String? episodeStr = tags['episode_sort'] ??
+      String? episodeStr =
+          tags['episode_sort'] ??
           tags['EPISODE_SORT'] ??
           tags['episode'] ??
           tags['EPISODE'] ??
@@ -849,7 +970,8 @@ class CoreBackend {
         episode = int.tryParse(episodeStr.toString());
       }
 
-      String? episodeTitle = tags['episode_id'] ??
+      String? episodeTitle =
+          tags['episode_id'] ??
           tags['EPISODE_ID'] ??
           tags['subtitle'] ??
           tags['SUBTITLE'];
@@ -860,8 +982,9 @@ class CoreBackend {
         debugPrint("🧠 Smart parsing: TITLE contains episode pattern");
 
         // Extract from TITLE instead of filename
-        RegExpMatch? titleMatch =
-            RegExp(r'[Ss](\d{1,2})[Ee](\d{1,2})').firstMatch(title);
+        RegExpMatch? titleMatch = RegExp(
+          r'[Ss](\d{1,2})[Ee](\d{1,2})',
+        ).firstMatch(title);
 
         if (titleMatch != null) {
           // Parse season/episode if not already in tags
@@ -894,8 +1017,9 @@ class CoreBackend {
         // Standard parsing: Check filename for S##E## pattern if tags don't have season/episode
         if (season == null || episode == null) {
           String filename = p.basenameWithoutExtension(filePath);
-          RegExpMatch? match =
-              RegExp(r'[Ss](\d{1,2})[Ee](\d{1,2})').firstMatch(filename);
+          RegExpMatch? match = RegExp(
+            r'[Ss](\d{1,2})[Ee](\d{1,2})',
+          ).firstMatch(filename);
           if (match != null) {
             season ??= int.tryParse(match.group(1)!);
             episode ??= int.tryParse(match.group(2)!);
@@ -947,7 +1071,8 @@ class CoreBackend {
 
       if (type == 'episode' && season != null && episode != null) {
         // TV Show format - use user's series format template
-        final String formatTemplate = settings?.seriesFormat ??
+        final String formatTemplate =
+            settings?.seriesFormat ??
             "{series_name} - S{season_number}E{episode_number} - {episode_title}";
 
         Map<String, dynamic> context = {
@@ -1018,14 +1143,18 @@ class CoreBackend {
   }
 
   /// Extract cover bytes from media file (wrapper around CoverExtractor)
-  static Future<Uint8List?> extractCover(String filePath,
-      {SettingsService? settings}) async {
+  static Future<Uint8List?> extractCover(
+    String filePath, {
+    SettingsService? settings,
+  }) async {
     return await CoverExtractor.extractCoverBytes(filePath, settings: settings);
   }
 
   /// Extract embedded cover art from media file and save to disk
-  static Future<String?> extractCoverArt(String filePath,
-      {SettingsService? settings}) async {
+  static Future<String?> extractCoverArt(
+    String filePath, {
+    SettingsService? settings,
+  }) async {
     // Check FFmpeg availability
     String? ffmpegPath;
 
@@ -1101,10 +1230,12 @@ class CoreBackend {
       // Check if any image files were extracted
       final extractedFiles = cacheDir
           .listSync()
-          .where((f) =>
-              f.path.toLowerCase().endsWith('.jpg') ||
-              f.path.toLowerCase().endsWith('.png') ||
-              f.path.toLowerCase().endsWith('.jpeg'))
+          .where(
+            (f) =>
+                f.path.toLowerCase().endsWith('.jpg') ||
+                f.path.toLowerCase().endsWith('.png') ||
+                f.path.toLowerCase().endsWith('.jpeg'),
+          )
           .toList();
 
       if (extractedFiles.isNotEmpty) {
@@ -1119,18 +1250,14 @@ class CoreBackend {
       }
 
       // Second try: Extract from video stream (fallback for files without attached pictures)
-      result = await Process.run(
-        ffmpegPath,
-        [
-          '-i', filePath,
-          '-vf', 'select=eq(pict_type\\,I)', // Select I-frames
-          '-frames:v', '1', // Only first frame
-          '-q:v', '2', // High quality
-          '-y',
-          coverPath,
-        ],
-        runInShell: true,
-      );
+      result = await Process.run(ffmpegPath, [
+        '-i', filePath,
+        '-vf', 'select=eq(pict_type\\,I)', // Select I-frames
+        '-frames:v', '1', // Only first frame
+        '-q:v', '2', // High quality
+        '-y',
+        coverPath,
+      ], runInShell: true);
 
       if (result.exitCode == 0 && File(coverPath).existsSync()) {
         final fileSize = File(coverPath).lengthSync();
@@ -1140,7 +1267,8 @@ class CoreBackend {
           return coverPath;
         } else {
           debugPrint(
-              '⚠️  Extracted file too small ($fileSize bytes), probably empty');
+            '⚠️  Extracted file too small ($fileSize bytes), probably empty',
+          );
         }
       }
     } catch (e) {
@@ -1152,8 +1280,11 @@ class CoreBackend {
 
   /// Embed metadata into MKV file using mkvpropedit with XML tags (fast in-place)
   static Future<bool> _embedMetadataMkv(
-      String filePath, String? coverPath, MatchResult metadata,
-      {SettingsService? settings}) async {
+    String filePath,
+    String? coverPath,
+    MatchResult metadata, {
+    SettingsService? settings,
+  }) async {
     String? toolPath = await _resolveMkvpropedit(settings: settings);
     if (toolPath == null) {
       debugPrint('mkvpropedit not available');
@@ -1172,15 +1303,17 @@ class CoreBackend {
       if (coverPath != null && File(coverPath).existsSync()) {
         // First, find all existing cover attachments
         var identifyResult = await Process.run(
-            toolPath.replaceAll('mkvpropedit.exe', 'mkvmerge.exe'),
-            ['--identify', filePath],
-            runInShell: false);
+          toolPath.replaceAll('mkvpropedit.exe', 'mkvmerge.exe'),
+          ['--identify', filePath],
+          runInShell: false,
+        );
 
         // Parse attachment IDs that need to be deleted
         List<String> deleteArgs = [filePath];
         RegExp attachmentRegex = RegExp(r'Attachment ID (\d+):.*cover');
-        for (var match
-            in attachmentRegex.allMatches(identifyResult.stdout.toString())) {
+        for (var match in attachmentRegex.allMatches(
+          identifyResult.stdout.toString(),
+        )) {
           deleteArgs.addAll(['--delete-attachment', match.group(1)!]);
         }
 
@@ -1191,18 +1324,15 @@ class CoreBackend {
         }
 
         // Now add the new cover
-        var result = await Process.run(
-            toolPath,
-            [
-              filePath,
-              '--attachment-name',
-              'cover.jpg',
-              '--attachment-mime-type',
-              'image/jpeg',
-              '--add-attachment',
-              coverPath
-            ],
-            runInShell: false);
+        var result = await Process.run(toolPath, [
+          filePath,
+          '--attachment-name',
+          'cover.jpg',
+          '--attachment-mime-type',
+          'image/jpeg',
+          '--add-attachment',
+          coverPath,
+        ], runInShell: false);
         if (result.exitCode == 0) {
           debugPrint('Cover attached');
           hasAttachment = true;
@@ -1224,7 +1354,8 @@ class CoreBackend {
               .replaceAll('<', '&lt;')
               .replaceAll('>', '&gt;');
           xml.writeln(
-              '<Simple><Name>$name</Name><String>$escaped</String></Simple>');
+            '<Simple><Name>$name</Name><String>$escaped</String></Simple>',
+          );
           tagCount++;
         }
       }
@@ -1255,12 +1386,16 @@ class CoreBackend {
         final cacheDir = p.join(exeDir, 'UserData', 'Cache');
         await Directory(cacheDir).create(recursive: true);
         String xmlPath = p.join(
-            cacheDir, 'tags_${DateTime.now().millisecondsSinceEpoch}.xml');
+          cacheDir,
+          'tags_${DateTime.now().millisecondsSinceEpoch}.xml',
+        );
         await File(xmlPath).writeAsString(xml.toString());
         debugPrint('Writing $tagCount tags (in-place)...');
-        var result = await Process.run(
-            toolPath, [filePath, '--tags', 'all:$xmlPath'],
-            runInShell: false);
+        var result = await Process.run(toolPath, [
+          filePath,
+          '--tags',
+          'all:$xmlPath',
+        ], runInShell: false);
         try {
           await File(xmlPath).delete();
         } catch (e) {}
@@ -1285,8 +1420,11 @@ class CoreBackend {
 
   /// Embed metadata into MP4 file using AtomicParsley (fast single-pass editing)
   static Future<bool> _embedMetadataMp4(
-      String filePath, String? coverPath, MatchResult metadata,
-      {SettingsService? settings}) async {
+    String filePath,
+    String? coverPath,
+    MatchResult metadata, {
+    SettingsService? settings,
+  }) async {
     String? toolPath = await _resolveAtomicParsley(settings: settings);
     if (toolPath == null) {
       debugPrint('⚠️  AtomicParsley not available');
@@ -1347,7 +1485,8 @@ class CoreBackend {
     DateTime beforeTime = targetFile.lastModifiedSync();
     int beforeSize = targetFile.lengthSync();
     debugPrint(
-        '📊 BEFORE: Modified=${beforeTime.toIso8601String()}, Size=$beforeSize');
+      '📊 BEFORE: Modified=${beforeTime.toIso8601String()}, Size=$beforeSize',
+    );
 
     try {
       // Use runInShell: false to avoid path quoting issues with spaces
@@ -1377,7 +1516,8 @@ class CoreBackend {
         DateTime afterTime = targetFile.lastModifiedSync();
         int afterSize = targetFile.lengthSync();
         debugPrint(
-            '📊 AFTER: Modified=${afterTime.toIso8601String()}, Size=$afterSize');
+          '📊 AFTER: Modified=${afterTime.toIso8601String()}, Size=$afterSize',
+        );
 
         bool timeChanged = afterTime.isAfter(beforeTime);
         bool sizeChanged = afterSize != beforeSize;
@@ -1387,7 +1527,8 @@ class CoreBackend {
 
         if (!timeChanged && !sizeChanged) {
           debugPrint(
-              '❌ FILE NOT MODIFIED - AtomicParsley did NOT write metadata!');
+            '❌ FILE NOT MODIFIED - AtomicParsley did NOT write metadata!',
+          );
           debugPrint('   This means the command failed silently');
           return false;
         }
@@ -1408,8 +1549,11 @@ class CoreBackend {
 
   /// Main metadata embedding dispatcher - tries format-specific tools first, falls back to FFmpeg
   static Future<void> embedMetadata(
-      String filePath, String? coverPath, MatchResult metadata,
-      {SettingsService? settings}) async {
+    String filePath,
+    String? coverPath,
+    MatchResult metadata, {
+    SettingsService? settings,
+  }) async {
     debugPrint("\n" + "=" * 60);
     debugPrint("🎬 EMBEDDING: ${p.basename(filePath)}");
     debugPrint("=" * 60);
@@ -1439,19 +1583,31 @@ class CoreBackend {
     // Try format-specific tool first for maximum speed
     if (ext == '.mkv') {
       debugPrint("🔧 Using mkvpropedit with XML tags (fast in-place)...");
-      success = await _embedMetadataMkv(filePath, coverPath, metadata,
-          settings: settings);
+      success = await _embedMetadataMkv(
+        filePath,
+        coverPath,
+        metadata,
+        settings: settings,
+      );
     } else if (ext == '.mp4') {
       debugPrint("🔧 Attempting AtomicParsley (fast single-pass)...");
-      success = await _embedMetadataMp4(filePath, coverPath, metadata,
-          settings: settings);
+      success = await _embedMetadataMp4(
+        filePath,
+        coverPath,
+        metadata,
+        settings: settings,
+      );
     }
 
     // Fall back to FFmpeg if specialized tool failed or unavailable
     if (!success) {
       debugPrint("⚠️  Falling back to FFmpeg (slower but reliable)...");
-      await _embedMetadataFFmpeg(filePath, coverPath, metadata,
-          settings: settings);
+      await _embedMetadataFFmpeg(
+        filePath,
+        coverPath,
+        metadata,
+        settings: settings,
+      );
     }
 
     debugPrint("=" * 60 + "\n");
@@ -1459,8 +1615,11 @@ class CoreBackend {
 
   /// Embed metadata using FFmpeg (fallback method - slower but universal)
   static Future<void> _embedMetadataFFmpeg(
-      String filePath, String? coverPath, MatchResult metadata,
-      {SettingsService? settings}) async {
+    String filePath,
+    String? coverPath,
+    MatchResult metadata, {
+    SettingsService? settings,
+  }) async {
     String ext = p.extension(filePath).toLowerCase();
     bool hasCover = coverPath != null && File(coverPath).existsSync();
 
@@ -1577,8 +1736,11 @@ class CoreBackend {
     // === EXECUTE ===
     try {
       // Use runInShell: false to avoid path quoting issues with spaces
-      var result =
-          await Process.run(_ffmpegPath ?? 'ffmpeg', args, runInShell: false);
+      var result = await Process.run(
+        _ffmpegPath ?? 'ffmpeg',
+        args,
+        runInShell: false,
+      );
 
       if (result.exitCode == 0) {
         // Verify temp file
@@ -1599,14 +1761,16 @@ class CoreBackend {
         }
 
         debugPrint(
-            "📦 Size: ${(origSize / 1048576).toStringAsFixed(1)} MB → ${(tempSize / 1048576).toStringAsFixed(1)} MB");
+          "📦 Size: ${(origSize / 1048576).toStringAsFixed(1)} MB → ${(tempSize / 1048576).toStringAsFixed(1)} MB",
+        );
 
         // Replace original
         try {
           File(filePath).deleteSync();
           File(tempPath).renameSync(filePath);
           debugPrint(
-              "✅ SUCCESS! Embedded ${hasCover ? 'cover + ' : ''}$metaCount metadata fields");
+            "✅ SUCCESS! Embedded ${hasCover ? 'cover + ' : ''}$metaCount metadata fields",
+          );
         } catch (e) {
           debugPrint("❌ Could not replace file: $e");
           if (File(tempPath).existsSync()) File(tempPath).deleteSync();
