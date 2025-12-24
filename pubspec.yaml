@@ -1,7 +1,7 @@
 name: mymeta
-description: MyMeta - Professional media file metadata manager and renamer
+description: MyMeta - Media file metadata manager and renamer
 publish_to: 'none'
-version: 1.0.0
+version: 1.0.1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -22,6 +22,8 @@ dependencies:
   xml: ^6.3.0
   package_info_plus: ^8.0.0
   path_provider: ^2.1.0
+  archive: ^3.4.0         # For ZIP extraction during updates
+  dio: ^5.4.0             # For downloads with progress
 
 dev_dependencies:
   flutter_test:

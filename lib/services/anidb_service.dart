@@ -123,18 +123,12 @@ class AnidbService {
     }
 
     data['type'] = animeElement.findElements('type').firstOrNull?.innerText;
-    data['episodecount'] = animeElement
-        .findElements('episodecount')
-        .firstOrNull
-        ?.innerText;
-    data['startdate'] = animeElement
-        .findElements('startdate')
-        .firstOrNull
-        ?.innerText;
-    data['description'] = animeElement
-        .findElements('description')
-        .firstOrNull
-        ?.innerText;
+    data['episodecount'] =
+        animeElement.findElements('episodecount').firstOrNull?.innerText;
+    data['startdate'] =
+        animeElement.findElements('startdate').firstOrNull?.innerText;
+    data['description'] =
+        animeElement.findElements('description').firstOrNull?.innerText;
 
     // Get poster/image URL
     final picture = animeElement.findElements('picture').firstOrNull?.innerText;
@@ -143,6 +137,35 @@ class AnidbService {
     }
 
     data['source'] = 'anidb'; // Mark as coming from AniDB
+
+    // Extract ratings (AniDB uses permanent/temporary/average)
+    final ratings = animeElement.findElements('ratings').firstOrNull;
+    if (ratings != null) {
+      // Prefer permanent rating, fallback to temporary
+      final permanent = ratings.findElements('permanent').firstOrNull;
+      final temporary = ratings.findElements('temporary').firstOrNull;
+
+      if (permanent != null && permanent.innerText.isNotEmpty) {
+        data['rating'] = permanent.innerText;
+      } else if (temporary != null && temporary.innerText.isNotEmpty) {
+        data['rating'] = temporary.innerText;
+      }
+    }
+
+    // Extract tags (used as genres)
+    final tags = animeElement.findElements('tags').firstOrNull;
+    if (tags != null) {
+      final tagList = tags
+          .findElements('tag')
+          .map((t) => t.findElements('name').firstOrNull?.innerText)
+          .where((name) => name != null)
+          .cast<String>()
+          .take(5) // Limit to top 5 tags
+          .toList();
+      if (tagList.isNotEmpty) {
+        data['tags'] = tagList;
+      }
+    }
 
     return data;
   }
@@ -174,6 +197,31 @@ class AnidbService {
     List<Map<String, dynamic>> results = [];
 
     for (var anime in dataList.take(10)) {
+      // Extract genres from Jikan
+      List<String>? genres;
+      if (anime['genres'] != null) {
+        genres = (anime['genres'] as List)
+            .map((g) => g['name']?.toString() ?? '')
+            .where((name) => name.isNotEmpty)
+            .toList();
+      }
+
+      // Extract studios
+      List<String>? studios;
+      if (anime['studios'] != null) {
+        studios = (anime['studios'] as List)
+            .map((s) => s['name']?.toString() ?? '')
+            .where((name) => name.isNotEmpty)
+            .toList();
+      }
+
+      // Extract age rating (rating field in Jikan is age rating: G, PG, PG-13, R, etc.)
+      String? ageRating = anime['rating']?.toString();
+      // Clean up the rating text (e.g., "PG-13 - Teens 13 or older" -> "PG-13")
+      if (ageRating != null && ageRating.contains(' - ')) {
+        ageRating = ageRating.split(' - ').first.trim();
+      }
+
       // Convert Jikan/MAL data to our format
       Map<String, dynamic> data = {
         'title': anime['title'],
@@ -184,7 +232,10 @@ class AnidbService {
         'startdate': anime['aired']?['from']?.toString().substring(0, 10),
         'description': anime['synopsis'],
         'poster_url': anime['images']?['jpg']?['large_image_url'],
-        'rating': anime['score']?.toString(),
+        'rating': anime['score']?.toString(), // Numeric rating (e.g., 8.5)
+        'age_rating': ageRating, // Age rating (G, PG, PG-13, R, etc.)
+        'tags': genres, // Use genres as tags
+        'studios': studios, // Studio names
         'source': 'mal', // Mark as coming from MAL/Jikan
       };
 
@@ -242,18 +293,12 @@ class AnidbService {
 
       data['aid'] = aid;
       data['type'] = animeElement.findElements('type').firstOrNull?.innerText;
-      data['episodecount'] = animeElement
-          .findElements('episodecount')
-          .firstOrNull
-          ?.innerText;
-      data['startdate'] = animeElement
-          .findElements('startdate')
-          .firstOrNull
-          ?.innerText;
-      data['description'] = animeElement
-          .findElements('description')
-          .firstOrNull
-          ?.innerText;
+      data['episodecount'] =
+          animeElement.findElements('episodecount').firstOrNull?.innerText;
+      data['startdate'] =
+          animeElement.findElements('startdate').firstOrNull?.innerText;
+      data['description'] =
+          animeElement.findElements('description').firstOrNull?.innerText;
 
       // Ratings
       final ratings = animeElement.findElements('ratings').firstOrNull;
@@ -418,6 +463,111 @@ class AnidbService {
     } catch (e) {
       debugPrint('❌ Error fetching episode list: $e');
       return episodeMap;
+    }
+  }
+
+  /// Get episode lookup map from MAL using Jikan API
+  /// Returns a map of "S##E##" -> "Episode Title"
+  /// This is used for Jikan/MAL search results that don't have AniDB IDs
+  Future<Map<String, String>> getEpisodeLookupFromMAL(
+      int malId, List<int> seasons) async {
+    Map<String, String> episodeMap = {};
+
+    try {
+      // Jikan API endpoint for episodes
+      final url = Uri.parse('https://api.jikan.moe/v4/anime/$malId/episodes');
+
+      debugPrint('📡 Fetching episode list from MAL ID: $malId');
+
+      // Respect Jikan rate limiting - increased delay to avoid 429 errors
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      final response = await http.get(url);
+
+      if (response.statusCode != 200) {
+        debugPrint('⚠️ Jikan episodes API error: ${response.statusCode}');
+        return episodeMap;
+      }
+
+      final jsonData = json.decode(response.body);
+      final episodes = jsonData['data'] as List?;
+
+      if (episodes == null || episodes.isEmpty) {
+        debugPrint('⚠️ No episodes found for MAL ID: $malId');
+        return episodeMap;
+      }
+
+      // Jikan episodes are numbered sequentially, assume S01 for all
+      for (var ep in episodes) {
+        final epNum = ep['mal_id']; // Episode number
+        final title = ep['title']?.toString();
+
+        if (epNum != null && title != null && title.isNotEmpty) {
+          // Map as S01E## (anime typically don't have multiple seasons in MAL numbering)
+          String key = "S01E$epNum";
+          episodeMap[key] = title;
+        }
+      }
+
+      debugPrint(
+          '✅ Fetched ${episodeMap.length} episode titles for MAL ID $malId');
+      return episodeMap;
+    } catch (e) {
+      debugPrint('❌ Error fetching MAL episode list: $e');
+      return episodeMap;
+    }
+  }
+
+  /// Get specific episode details including description from MAL
+  /// Returns: {title: ..., description: ...} or null if not found
+  Future<Map<String, String>?> getEpisodeDetailsFromMAL(
+    int malId,
+    int episode,
+  ) async {
+    try {
+      // Jikan API endpoint for episodes
+      final url = Uri.parse('https://api.jikan.moe/v4/anime/$malId/episodes');
+
+      debugPrint(
+          '📡 Fetching episode details for MAL ID: $malId, Episode: $episode');
+
+      // Respect Jikan rate limiting
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      final response = await http.get(url);
+
+      if (response.statusCode != 200) {
+        debugPrint('⚠️ Jikan episodes API error: ${response.statusCode}');
+        return null;
+      }
+
+      final jsonData = json.decode(response.body);
+      final episodes = jsonData['data'] as List?;
+
+      if (episodes == null || episodes.isEmpty) {
+        debugPrint('⚠️ No episodes found for MAL ID: $malId');
+        return null;
+      }
+
+      // Find the specific episode
+      for (var ep in episodes) {
+        final epNum = ep['mal_id']; // Episode number
+        if (epNum == episode) {
+          final title = ep['title']?.toString();
+          final synopsis = ep['synopsis']?.toString();
+
+          return {
+            'title': title ?? '',
+            'description': synopsis ?? '',
+          };
+        }
+      }
+
+      debugPrint('⚠️ Episode $episode not found in MAL ID $malId');
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error fetching MAL episode details: $e');
+      return null;
     }
   }
 }

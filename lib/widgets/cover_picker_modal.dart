@@ -149,11 +149,32 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
   void initState() {
     super.initState();
     _currentResults = widget.searchResults;
-    // Detect initial source from results (TMDB has tmdbId, OMDb has imdbId)
+
+    // Auto-select first available configured source
+    final settings = context.read<SettingsService>();
+    final hasTmdb = settings.tmdbApiKey.isNotEmpty;
+    final hasOmdb = settings.omdbApiKey.isNotEmpty;
+    final hasAnidb = settings.anidbClientId.isNotEmpty;
+
+    // Try to detect source from existing results
     if (_currentResults.isNotEmpty) {
       if (_currentResults.first.imdbId != null &&
-          _currentResults.first.tmdbId == null) {
+          _currentResults.first.tmdbId == null &&
+          hasOmdb) {
         _selectedSource = 'omdb';
+      } else if (_currentResults.first.tmdbId != null && hasTmdb) {
+        _selectedSource = 'tmdb';
+      } else if (hasAnidb) {
+        _selectedSource = 'anidb';
+      }
+    } else {
+      // No results yet, pick first available source
+      if (hasTmdb) {
+        _selectedSource = 'tmdb';
+      } else if (hasOmdb) {
+        _selectedSource = 'omdb';
+      } else if (hasAnidb) {
+        _selectedSource = 'anidb';
       }
     }
   }
@@ -171,32 +192,14 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
     final year = widget.currentResult!.year;
     final isMovie = widget.currentResult!.type == 'movie';
 
-    // Check if API key is configured
+    // Get API key for selected source (already validated by dropdown)
     String apiKey;
     if (_selectedSource == 'tmdb') {
-      if (settings.tmdbApiKey.isEmpty) {
-        setState(() {
-          _errorMessage = 'TMDB API key not configured';
-        });
-        return;
-      }
       apiKey = settings.tmdbApiKey;
     } else if (_selectedSource == 'omdb') {
-      if (settings.omdbApiKey.isEmpty) {
-        setState(() {
-          _errorMessage = 'OMDb API key not configured';
-        });
-        return;
-      }
       apiKey = settings.omdbApiKey;
     } else {
       // anidb
-      if (settings.anidbClientId.isEmpty) {
-        setState(() {
-          _errorMessage = 'AniDB Client ID not configured';
-        });
-        return;
-      }
       apiKey = settings.anidbClientId;
     }
 
@@ -278,65 +281,117 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surfaceVariant,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .outline
-                                  .withOpacity(0.2),
-                            ),
-                          ),
-                          child: DropdownButton<String>(
-                            value: _selectedSource,
-                            isExpanded: true,
-                            underline: const SizedBox(),
-                            icon: const Icon(Icons.arrow_drop_down),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'tmdb',
-                                child: Row(
+                        child: Consumer<SettingsService>(
+                          builder: (context, settings, _) {
+                            // Build dropdown items only for configured sources
+                            final List<DropdownMenuItem<String>>
+                                availableItems = [];
+
+                            if (settings.tmdbApiKey.isNotEmpty) {
+                              availableItems.add(
+                                const DropdownMenuItem(
+                                  value: 'tmdb',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.movie_outlined, size: 18),
+                                      SizedBox(width: 8),
+                                      Text('TMDB'),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
+
+                            if (settings.omdbApiKey.isNotEmpty) {
+                              availableItems.add(
+                                const DropdownMenuItem(
+                                  value: 'omdb',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.local_movies_outlined,
+                                          size: 18),
+                                      SizedBox(width: 8),
+                                      Text('OMDb'),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
+
+                            if (settings.anidbClientId.isNotEmpty) {
+                              availableItems.add(
+                                const DropdownMenuItem(
+                                  value: 'anidb',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.theaters_outlined, size: 18),
+                                      SizedBox(width: 8),
+                                      Text('AniDB'),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
+
+                            // If no sources configured, show disabled message
+                            if (availableItems.isEmpty) {
+                              return Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.orange),
+                                ),
+                                child: const Row(
                                   children: [
-                                    Icon(Icons.movie_outlined, size: 18),
+                                    Icon(Icons.warning_amber,
+                                        color: Colors.orange, size: 18),
                                     SizedBox(width: 8),
-                                    Text('TMDB'),
+                                    Expanded(
+                                      child: Text(
+                                        'No API keys configured',
+                                        style: TextStyle(
+                                            color: Colors.orange, fontSize: 12),
+                                      ),
+                                    ),
                                   ],
                                 ),
-                              ),
-                              DropdownMenuItem(
-                                value: 'omdb',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.local_movies_outlined, size: 18),
-                                    SizedBox(width: 8),
-                                    Text('OMDb'),
-                                  ],
+                              );
+                            }
+
+                            return Container(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceVariant,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outline
+                                      .withOpacity(0.2),
                                 ),
                               ),
-                              DropdownMenuItem(
-                                value: 'anidb',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.theaters_outlined, size: 18),
-                                    SizedBox(width: 8),
-                                    Text('AniDB'),
-                                  ],
-                                ),
+                              child: DropdownButton<String>(
+                                value: _selectedSource,
+                                isExpanded: true,
+                                underline: const SizedBox(),
+                                icon: const Icon(Icons.arrow_drop_down),
+                                items: availableItems,
+                                onChanged: (String? newSource) {
+                                  if (newSource != null &&
+                                      newSource != _selectedSource) {
+                                    setState(() {
+                                      _selectedSource = newSource;
+                                    });
+                                    _performSearch();
+                                  }
+                                },
                               ),
-                            ],
-                            onChanged: (String? newSource) {
-                              if (newSource != null &&
-                                  newSource != _selectedSource) {
-                                setState(() {
-                                  _selectedSource = newSource;
-                                });
-                                _performSearch();
-                              }
-                            },
-                          ),
+                            );
+                          },
                         ),
                       ),
                     ],

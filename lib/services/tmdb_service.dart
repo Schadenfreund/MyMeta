@@ -61,11 +61,8 @@ class TmdbService {
     List posters = data['posters'] ?? [];
 
     // Return top 5 posters sorted by vote count
-    final sortedPosters = posters
-        .where((p) => p['file_path'] != null)
-        .toList()
-      ..sort((a, b) => (b['vote_count'] ?? 0)
-          .compareTo(a['vote_count'] ?? 0));
+    final sortedPosters = posters.where((p) => p['file_path'] != null).toList()
+      ..sort((a, b) => (b['vote_count'] ?? 0).compareTo(a['vote_count'] ?? 0));
 
     return sortedPosters
         .take(5)
@@ -122,11 +119,8 @@ class TmdbService {
     List posters = data['posters'] ?? [];
 
     // Return top 5 posters sorted by vote count
-    final sortedPosters = posters
-        .where((p) => p['file_path'] != null)
-        .toList()
-      ..sort((a, b) => (b['vote_count'] ?? 0)
-          .compareTo(a['vote_count'] ?? 0));
+    final sortedPosters = posters.where((p) => p['file_path'] != null).toList()
+      ..sort((a, b) => (b['vote_count'] ?? 0).compareTo(a['vote_count'] ?? 0));
 
     return sortedPosters
         .take(5)
@@ -166,6 +160,21 @@ class TmdbService {
     }
 
     return lookup;
+  }
+
+  /// Get specific episode details including description
+  Future<Map<String, dynamic>?> getEpisodeDetails(
+    int seriesId,
+    int season,
+    int episode,
+  ) async {
+    var uri = Uri.parse(
+      '$_baseUrl/tv/$seriesId/season/$season/episode/$episode?api_key=$apiKey',
+    );
+    var response = await http.get(uri);
+
+    if (response.statusCode != 200) return null;
+    return jsonDecode(response.body);
   }
 
   // Helper method to extract genres
