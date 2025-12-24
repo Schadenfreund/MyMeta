@@ -37,7 +37,25 @@ class CoreBackend {
     int? season, // For TV shows - preserved from original file
     int? episode, // For TV shows - preserved from original file
     String? episodeTitle, // For TV shows - preserved from original file
+    bool fetchAllEpisodes =
+        false, // If true, fetches all episode details (no rate limit)
   }) async {
+    // Validation: Ensure required parameters are valid
+    if (apiKey.trim().isEmpty) {
+      debugPrint('❌ searchMetadata: API key is empty for source "$source"');
+      return [];
+    }
+
+    if (title.trim().isEmpty) {
+      debugPrint('❌ searchMetadata: Title is empty, cannot search');
+      return [];
+    }
+
+    if (source != 'tmdb' && source != 'omdb' && source != 'anidb') {
+      debugPrint('❌ searchMetadata: Unknown source "$source"');
+      return [];
+    }
+
     List<MatchResult> results = [];
 
     try {
@@ -95,8 +113,7 @@ class CoreBackend {
                 newName: result['title'] ?? 'Unknown',
                 posterUrl: posterUrl,
                 title: result['title'],
-                year:
-                    result['release_date'] != null &&
+                year: result['release_date'] != null &&
                         result['release_date'].length >= 4
                     ? int.tryParse(result['release_date'].substring(0, 4))
                     : null,
@@ -153,30 +170,35 @@ class CoreBackend {
                 // Fetch alternative posters
                 alternativePosters = await tmdb.getTVPosters(tvId);
 
-                // Fetch specific episode title if season/episode provided
+                // Fetch specific episode title and description if season/episode provided
                 if (season != null && episode != null) {
                   debugPrint(
-                    '🔎 Fetching episode title for S${season}E${episode} from TMDB show $tvId',
+                    '🔎 Fetching episode details for S${season}E${episode} from TMDB show $tvId',
                   );
                   try {
-                    final episodeLookup = await tmdb.getEpisodeLookup(tvId, [
+                    // Fetch episode details including description
+                    final episodeDetails = await tmdb.getEpisodeDetails(
+                      tvId,
                       season,
-                    ]);
-                    String key = "S${season}E${episode}";
-                    if (episodeLookup.containsKey(key)) {
-                      fetchedEpisodeTitle = episodeLookup[key];
+                      episode,
+                    );
+
+                    if (episodeDetails != null) {
+                      // Use episode-specific title and description
+                      fetchedEpisodeTitle = episodeDetails['name'];
+                      description = episodeDetails['overview'] ?? description;
                       debugPrint(
-                        '✅ Fetched episode title for $key: $fetchedEpisodeTitle',
+                        '✅ Fetched episode details for S${season}E${episode}: $fetchedEpisodeTitle',
                       );
                     } else {
                       debugPrint(
-                        '⚠️ Show "${result['name']}" doesn\'t have $key - skipping',
+                        '⚠️ Show "${result['name']}" doesn\'t have S${season}E${episode} - skipping',
                       );
                       continue; // Skip this show - it doesn't have this episode
                     }
                   } catch (e) {
                     debugPrint(
-                      'Error fetching episode title: $e - skipping show',
+                      'Error fetching episode details: $e - skipping show',
                     );
                     continue; // Skip on error too
                   }
@@ -192,8 +214,7 @@ class CoreBackend {
                 newName: result['name'] ?? 'Unknown',
                 posterUrl: posterUrl,
                 title: result['name'],
-                year:
-                    result['first_air_date'] != null &&
+                year: result['first_air_date'] != null &&
                         result['first_air_date'].length >= 4
                     ? int.tryParse(result['first_air_date'].substring(0, 4))
                     : null,
@@ -225,8 +246,8 @@ class CoreBackend {
             // Basic info from search
             String? posterUrl =
                 result['Poster'] != null && result['Poster'] != 'N/A'
-                ? result['Poster']
-                : null;
+                    ? result['Poster']
+                    : null;
 
             // Variables for detailed metadata
             List<String>? genres;
@@ -291,8 +312,8 @@ class CoreBackend {
             // Basic info from search
             String? posterUrl =
                 result['Poster'] != null && result['Poster'] != 'N/A'
-                ? result['Poster']
-                : null;
+                    ? result['Poster']
+                    : null;
 
             // Variables for detailed metadata
             List<String>? genres;
@@ -384,6 +405,11 @@ class CoreBackend {
         // Search using hybrid approach (AniDB + Jikan/MAL)
         final allResults = await anidb.searchAnimeAll(title);
 
+        // Build MatchResult list for searchResults
+        List<MatchResult> allMatchResults = [];
+
+        // Fetch episode details for all results when building searchResults
+        // Users expect complete metadata in Fix Match modal
         for (var result in allResults) {
           // Basic info from search
           String? posterUrl = result['poster_url'];
@@ -418,56 +444,109 @@ class CoreBackend {
           // Variables for episode-specific data
           String? fetchedEpisodeTitle = episodeTitle;
 
-          // If we have season/episode info and this is from AniDB (has AID)
+          // Fetch episode title and description if we have season/episode info
           if (!isMovie &&
               season != null &&
               episode != null &&
-              result['aid'] != null) {
+              (result['aid'] != null || result['mal_id'] != null)) {
             try {
-              final aid = result['aid'] as int;
-              final episodeLookup = await anidb.getEpisodeLookup(aid, [season]);
-              String key = "S${season}E${episode}";
-              if (episodeLookup.containsKey(key)) {
-                fetchedEpisodeTitle = episodeLookup[key];
+              // Try AniDB first (if we have AID)
+              if (result['aid'] != null) {
+                final aid = result['aid'] as int;
+                debugPrint('🔍 Fetching episodes from AniDB (AID: $aid)');
+                final episodeLookup =
+                    await anidb.getEpisodeLookup(aid, [season]);
+                String key = "S${season}E${episode}";
+
+                if (episodeLookup.containsKey(key)) {
+                  fetchedEpisodeTitle = episodeLookup[key];
+                  debugPrint(
+                    '✅ Fetched episode title for $key: $fetchedEpisodeTitle',
+                  );
+                } else {
+                  debugPrint(
+                    'ℹ️  Episode $key not found in "${resultTitle}" - will show without episode title',
+                  );
+                  fetchedEpisodeTitle = null;
+                }
+              }
+              // Fall back to MAL/Jikan if we have MAL ID
+              else if (result['mal_id'] != null) {
+                final malId = result['mal_id'] as int;
                 debugPrint(
-                  '✅ Fetched episode title for $key: $fetchedEpisodeTitle',
-                );
-              } else {
-                debugPrint(
-                  '⚠️ Anime "${resultTitle}" doesn\'t have $key - skipping',
-                );
-                continue; // Skip this anime
+                    '🔍 Fetching episode details from MAL (ID: $malId, Episode: $episode)');
+
+                // Fetch episode details including description
+                final episodeDetails =
+                    await anidb.getEpisodeDetailsFromMAL(malId, episode);
+
+                if (episodeDetails != null) {
+                  fetchedEpisodeTitle = episodeDetails['title'];
+                  // Use episode-specific description if available
+                  if (episodeDetails['description']?.isNotEmpty == true) {
+                    description = episodeDetails['description'];
+                  }
+                  debugPrint(
+                    '✅ Fetched episode details for E${episode}: $fetchedEpisodeTitle',
+                  );
+                } else {
+                  debugPrint(
+                    'ℹ️  Episode E${episode} not found in MAL ID $malId - will show without episode details',
+                  );
+                  fetchedEpisodeTitle = null;
+                }
               }
             } catch (e) {
-              debugPrint('Error fetching episode title: $e - skipping');
-              continue;
+              debugPrint(
+                  '⚠️  Error fetching episode details: $e - continuing without it');
+              // Don't skip - just proceed without episode title
+              fetchedEpisodeTitle = null;
             }
           }
 
-          results.add(
-            MatchResult(
-              newName: resultTitle ?? 'Unknown',
-              posterUrl: posterUrl,
-              title: resultTitle,
-              year: year,
-              season: !isMovie ? season : null,
-              episode: !isMovie ? episode : null,
-              episodeTitle: !isMovie ? fetchedEpisodeTitle : null,
-              type: type,
-              description: description,
-              genres: result['tags'] != null
-                  ? List<String>.from(result['tags'])
-                  : null,
-              rating: rating,
-              runtime:
-                  episodeCount, // Store episode count in runtime field for now
-              // Store source-specific IDs
-              tmdbId: null,
-              imdbId: null,
-              // Note: We could add anidbId and malId fields to MatchResult if needed
-            ),
+          final matchResult = MatchResult(
+            newName: resultTitle ?? 'Unknown',
+            posterUrl: posterUrl,
+            title: resultTitle,
+            year: year,
+            season: !isMovie ? season : null,
+            episode: !isMovie ? episode : null,
+            episodeTitle: !isMovie ? fetchedEpisodeTitle : null,
+            type: type,
+            description: description,
+            genres: result['tags'] != null
+                ? List<String>.from(result['tags'])
+                : null,
+            rating: rating,
+            runtime: episodeCount, // Episode count for anime series
+            // Anime-specific metadata from Jikan/MAL
+            director: null, // Anime credits creators, not directors typically
+            actors: null, // Voice actors would require additional API call
+            contentRating:
+                result['age_rating']?.toString(), // G, PG, PG-13, R, etc.
+            studio: result['studios'] != null &&
+                    (result['studios'] as List).isNotEmpty
+                ? (result['studios'] as List)
+                    .join(', ') // Join multiple studios
+                : null,
+            // Store source-specific IDs
+            tmdbId: null,
+            imdbId: null,
+            // Note: result['mal_id'] available if we add malId field to MatchResult
+            alternativePosterUrls:
+                null, // AniDB doesn't provide multiple posters
+            searchResults: null, // Will be set after loop
           );
+
+          allMatchResults.add(matchResult);
         }
+
+        // Add searchResults to all results for Fix Match functionality
+        for (var matchResult in allMatchResults) {
+          matchResult.searchResults = List.from(allMatchResults);
+        }
+
+        results.addAll(allMatchResults);
       }
     } catch (e) {
       debugPrint('Search error: $e');
@@ -491,18 +570,46 @@ class CoreBackend {
     List<MatchResult> results = [];
 
     // Determine which API source to use
+    // Try preferred source first, then fallback to any available
     String? activeSource;
     String? activeApiKey;
 
-    if (tmdbApiKey != null && tmdbApiKey.isNotEmpty) {
+    // Try user's preferred source first
+    if (metadataSource == 'tmdb' &&
+        tmdbApiKey != null &&
+        tmdbApiKey.isNotEmpty) {
       activeSource = 'tmdb';
       activeApiKey = tmdbApiKey;
-    } else if (omdbApiKey != null && omdbApiKey.isNotEmpty) {
+    } else if (metadataSource == 'omdb' &&
+        omdbApiKey != null &&
+        omdbApiKey.isNotEmpty) {
       activeSource = 'omdb';
       activeApiKey = omdbApiKey;
-    } else if (anidbClientId != null && anidbClientId.isNotEmpty) {
+    } else if (metadataSource == 'anidb' &&
+        anidbClientId != null &&
+        anidbClientId.isNotEmpty) {
       activeSource = 'anidb';
       activeApiKey = anidbClientId;
+    }
+
+    // Fallback to any available API if preferred source isn't configured
+    if (activeSource == null) {
+      if (tmdbApiKey != null && tmdbApiKey.isNotEmpty) {
+        activeSource = 'tmdb';
+        activeApiKey = tmdbApiKey;
+        debugPrint(
+            '⚠️ Preferred source "$metadataSource" not configured, using TMDB instead');
+      } else if (omdbApiKey != null && omdbApiKey.isNotEmpty) {
+        activeSource = 'omdb';
+        activeApiKey = omdbApiKey;
+        debugPrint(
+            '⚠️ Preferred source "$metadataSource" not configured, using OMDb instead');
+      } else if (anidbClientId != null && anidbClientId.isNotEmpty) {
+        activeSource = 'anidb';
+        activeApiKey = anidbClientId;
+        debugPrint(
+            '⚠️ Preferred source "$metadataSource" not configured, using AniDB instead');
+      }
     }
 
     if (activeSource == null || activeApiKey == null) {
@@ -865,11 +972,15 @@ class CoreBackend {
           '-show_streams',
           filePath,
         ],
-        runInShell: true,
+        runInShell:
+            false, // Don't use shell to avoid issues with spaces in paths
       );
 
       if (result.exitCode != 0) {
         debugPrint("❌ FFprobe failed (exit ${result.exitCode})");
+        if (result.stderr.toString().isNotEmpty) {
+          debugPrint("   Stderr: ${result.stderr}");
+        }
         debugPrint("=" * 60 + "\n");
         return null;
       }
@@ -902,8 +1013,7 @@ class CoreBackend {
         year = int.tryParse(yearStr.toString().substring(0, 4));
       }
 
-      String? description =
-          tags['comment'] ??
+      String? description = tags['comment'] ??
           tags['description'] ??
           tags['synopsis'] ??
           tags['COMMENT'] ??
@@ -913,8 +1023,7 @@ class CoreBackend {
       String? genre = tags['genre'] ?? tags['GENRE'];
       List<String>? genres = genre?.split(',').map((e) => e.trim()).toList();
 
-      String? director =
-          tags['director'] ??
+      String? director = tags['director'] ??
           tags['artist'] ??
           tags['DIRECTOR'] ??
           tags['ARTIST'];
@@ -932,8 +1041,7 @@ class CoreBackend {
       String? contentRating = tags['content_rating'] ?? tags['CONTENT_RATING'];
 
       // TV Show metadata - check MANY variations!
-      String? show =
-          tags['show'] ??
+      String? show = tags['show'] ??
           tags['SHOW'] ??
           tags['series'] ??
           tags['SERIES'] ??
@@ -941,8 +1049,7 @@ class CoreBackend {
           tags['ALBUM'];
 
       // Season - check multiple possible names
-      String? seasonStr =
-          tags['season_number'] ??
+      String? seasonStr = tags['season_number'] ??
           tags['SEASON_NUMBER'] ??
           tags['season'] ??
           tags['SEASON'] ??
@@ -954,8 +1061,7 @@ class CoreBackend {
       }
 
       // Episode - check multiple possible names
-      String? episodeStr =
-          tags['episode_sort'] ??
+      String? episodeStr = tags['episode_sort'] ??
           tags['EPISODE_SORT'] ??
           tags['episode'] ??
           tags['EPISODE'] ??
@@ -970,8 +1076,7 @@ class CoreBackend {
         episode = int.tryParse(episodeStr.toString());
       }
 
-      String? episodeTitle =
-          tags['episode_id'] ??
+      String? episodeTitle = tags['episode_id'] ??
           tags['EPISODE_ID'] ??
           tags['subtitle'] ??
           tags['SUBTITLE'];
@@ -1071,8 +1176,7 @@ class CoreBackend {
 
       if (type == 'episode' && season != null && episode != null) {
         // TV Show format - use user's series format template
-        final String formatTemplate =
-            settings?.seriesFormat ??
+        final String formatTemplate = settings?.seriesFormat ??
             "{series_name} - S{season_number}E{episode_number} - {episode_title}";
 
         Map<String, dynamic> context = {
@@ -1250,14 +1354,17 @@ class CoreBackend {
       }
 
       // Second try: Extract from video stream (fallback for files without attached pictures)
-      result = await Process.run(ffmpegPath, [
-        '-i', filePath,
-        '-vf', 'select=eq(pict_type\\,I)', // Select I-frames
-        '-frames:v', '1', // Only first frame
-        '-q:v', '2', // High quality
-        '-y',
-        coverPath,
-      ], runInShell: true);
+      result = await Process.run(
+          ffmpegPath,
+          [
+            '-i', filePath,
+            '-vf', 'select=eq(pict_type\\,I)', // Select I-frames
+            '-frames:v', '1', // Only first frame
+            '-q:v', '2', // High quality
+            '-y',
+            coverPath,
+          ],
+          runInShell: true);
 
       if (result.exitCode == 0 && File(coverPath).existsSync()) {
         final fileSize = File(coverPath).lengthSync();
@@ -1324,15 +1431,18 @@ class CoreBackend {
         }
 
         // Now add the new cover
-        var result = await Process.run(toolPath, [
-          filePath,
-          '--attachment-name',
-          'cover.jpg',
-          '--attachment-mime-type',
-          'image/jpeg',
-          '--add-attachment',
-          coverPath,
-        ], runInShell: false);
+        var result = await Process.run(
+            toolPath,
+            [
+              filePath,
+              '--attachment-name',
+              'cover.jpg',
+              '--attachment-mime-type',
+              'image/jpeg',
+              '--add-attachment',
+              coverPath,
+            ],
+            runInShell: false);
         if (result.exitCode == 0) {
           debugPrint('Cover attached');
           hasAttachment = true;
@@ -1391,11 +1501,14 @@ class CoreBackend {
         );
         await File(xmlPath).writeAsString(xml.toString());
         debugPrint('Writing $tagCount tags (in-place)...');
-        var result = await Process.run(toolPath, [
-          filePath,
-          '--tags',
-          'all:$xmlPath',
-        ], runInShell: false);
+        var result = await Process.run(
+            toolPath,
+            [
+              filePath,
+              '--tags',
+              'all:$xmlPath',
+            ],
+            runInShell: false);
         try {
           await File(xmlPath).delete();
         } catch (e) {}

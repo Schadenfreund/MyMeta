@@ -6,6 +6,7 @@ import '../widgets/accent_color_picker.dart';
 import '../widgets/about_card.dart';
 import '../widgets/tool_paths_card.dart';
 import '../widgets/app_card.dart';
+import '../widgets/update_check_card.dart';
 import '../theme/app_theme.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -194,6 +195,11 @@ class _SettingsPageState extends State<SettingsPage> {
             checkingTools: settings.isCheckingTools,
             onRefresh: settings.checkToolAvailability,
           ),
+
+          const SizedBox(height: AppSpacing.md),
+
+          // Update Check Card
+          const UpdateCheckCard(),
 
           const SizedBox(height: AppSpacing.md),
 

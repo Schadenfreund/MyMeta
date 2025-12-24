@@ -1,262 +1,105 @@
-# MyMeta - Changelog
+# Changelog
 
-Track all notable changes, todos, and development guidelines.
+All notable changes to MyMeta will be documented in this file.
 
----
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 🆕 Recent Updates
+## [1.0.2] - 2025-12-24
 
-### **v1.0.0** - 2025-12-22
-**Production Release - Zero Issues**
+### Fixed
+- **Critical: Metadata Reading on Paths with Spaces** - Fixed FFprobe failing to read embedded metadata when project/file paths contain spaces (like "My Drive"). Changed `runInShell` from `true` to `false` to properly handle paths with spaces. Metadata now correctly persists after embedding and can be read on re-import.
+- **Auto-Update System** - Configured GitHub repository information (Schadenfreund/MyMeta) for automatic update checks
 
-#### Code Quality
-- ✅ Achieved **zero lint issues** (down from 245)
-- ✅ Replaced 134 `print()` with `debugPrint()` (auto-stripped in release)
-- ✅ Updated 63 deprecated Flutter APIs to modern syntax
-- ✅ Fixed all BuildContext async safety issues
-- ✅ Removed all unnecessary imports and null assertions
-- ✅ 100% sound null safety maintained
+### Added
+- **Auto-Update Feature** - Added "Software Updates" card in Settings that checks GitHub Releases for new versions
+- **Update Service** - Complete auto-update implementation with progress tracking and UserData preservation
+- **Better Error Logging** - FFprobe errors now show stderr output for easier debugging
 
-#### Branding & Cleanup
-- ✅ Removed all "simpler_filebot" references
-- ✅ Updated window title to "MyMeta"
-- ✅ Consolidated build scripts into single `build.bat`
-- ✅ Deleted deprecated scripts (bundle_ffmpeg.ps1, setup.bat)
-- ✅ Cleaned up 15+ temporary analysis files
-- ✅ Consolidated redundant documentation
+## [1.0.1] - 2025-12-24
 
-#### Features Enhanced
-- ✅ Smart batch processing with metadata disambiguation
-- ✅ TV show episode grouping for efficient workflow
-- ✅ Multiple result selection modal for ambiguous searches
-- ✅ Enhanced performance (60-120x faster with specialized tools)
-- ✅ Modern Flutter 3.x+ APIs throughout
+### Added
+- **Episode-Specific Descriptions**: All metadata sources (TMDB, OMDb, AniDB/MAL) now fetch and display episode-specific descriptions instead of series overviews
+- **Season/Episode Override**: Edit season and episode numbers in metadata editor and re-search with corrected values - perfect for fixing wrong filename parsing or handling MAL's unique season numbering
+- **Auto-Match Visual Indicators**: Files matched via "Search All Metadata" now show a 🔄 change icon instead of ☁️ cloud icon, making it easy to spot and fix incorrect auto-matches
+- **Fix Match Modal Integration**: Click the 🔄 icon on auto-matched files to open Fix Match modal with all 10 search results for easy correction
+- **Complete Fix Match Metadata**: All search results in Fix Match now have complete metadata (episode titles, descriptions, etc.) instead of just the first 3 results
 
-#### Build & Distribution
-- ✅ Single comprehensive build script with menu options
-- ✅ Development and release build support
-- ✅ Automated code analysis before builds
-- ✅ Clean project structure ready for distribution
+### Fixed
+- **Metadata Editor**: Fixed critical setState() during build errors that prevented typing more than one character in metadata fields
+- **Excessive Save Calls**: Implemented pending save flag to prevent cascade of save operations when editing metadata
+- **Episode Descriptions**: Fixed TV show episodes and anime showing series descriptions instead of episode-specific descriptions
+- **AniDB/MAL Episode Details**: Now correctly fetches episode titles and descriptions from Jikan API for all anime results
+- **TMDB Episode Descriptions**: Now uses episode details API to get episode-specific descriptions instead of series overview
+- **Alternative Covers Button**: Renamed from "Browse Gallery" to "Alternative Covers" and shows helpful message when no covers are available instead of silent failure
+- **Rate Limiting**: Removed restrictive rate limiting for search results to ensure Fix Match always has complete metadata
 
----
+### Changed
+- **Search All Workflow**: More transparent and user-friendly - auto-matched files visually indicated and easy to correct with one click
+- **Icon Behavior**: Search icon (☁️) vs Fix Match icon (🔄) provides clear visual feedback on file matching source
+- **UserData Management**: Better handling of episode override persistence across searches
 
-### **v0.9.1** - 2025-12-21 (Internal)
-**UI Architecture Refactoring**
+### Improved
+- **Metadata Completeness**: Centralized and robust metadata fetching ensures all fields are populated across all sources
+- **User Experience**: More dynamic and intuitive interface that adapts based on user actions
+- **Code Quality**: Cleaner, more maintainable code with better separation of concerns
 
-#### Added
-- ✅ Centralized card component system (`app_card.dart`)
-  - `AppCard` - Reusable card container
-  - `AppCardHeader` - Inline title + description header
-  - `AppSettingRow` - Setting row with inline labels
-  - `AppLabeledInput` - Input field with inline labels
+## [1.0.0] - 2025-12-23
 
-#### Changed
-- ✅ **Settings Page** - Refactored to use centralized components
-  - API key inputs now display label + description inline (was stacked)
-  - Removed 138 lines of duplicate code
-  - All cards use consistent AppCard styling
-- ✅ **Formats Page** - Refactored to use centralized components
-  - Card headers now display title + description inline
-  - Help card uses AppCardHeader for consistency
-  - Reduced code by 30 lines
-- ✅ **Tool Paths Card** - Fixed layout and status detection
-  - Grey description text now appears next to bold title (was below)
-  - Status indicator moved to right side of header (was left)
-  - Fixed FFmpeg availability status detection
+### Added
+- Initial release of MyMeta
+- **Multi-Source Metadata**: Search TMDB, OMDb, and AniDB for movies and TV shows
+- **Bulk Operations**: Search All Metadata and Apply All for efficient batch processing
+- **Inline Metadata Editor**: Edit all metadata fields inline with live preview
+- **Cover Art Management**: Paste from clipboard, choose files, or browse alternative covers
+- **External Tools Integration**: FFmpeg, mkvpropedit, and AtomicParsley support
+- **Statistics Tracking**: Lifetime TV shows and movies matched
+- **Customizable Appearance**: Accent color picker with 8 preset colors
+- **Fix Match Modal**: Select different search results if auto-match is incorrect
+- **Settings Persistence**: SQLite database for reliable settings storage
+- **UserData Folder**: Centralized user data in AppData/Roaming folder
 
-#### Fixed
-- ✅ All card headers now use inline layout (title + description on same line)
-- ✅ Consistent spacing and alignment across all cards
-- ✅ Theme-aware colors for description text
-- ✅ Status indicators positioned correctly (right side)
+### Features
+- Drag-and-drop file support
+- File picker for manual file selection
+- Real-time metadata preview
+- Episode title fetching for TV shows
+- Season and episode detection from filenames
+- Smart filename parsing
+- Cover art embedding for MKV and MP4 files
+- Alternative poster selection
+- Manual metadata editing
+- Search result re-matching
 
-#### Code Quality
-- 📉 Reduced total codebase by ~168 lines
-- ♻️ Implemented DRY principles thoroughly
-- 🎨 Centralized UI patterns for maintainability
-- 📚 Updated architecture documentation
-
----
-
-### **v1.6.0** - 2025-12-20
-**One-Click Tool Setup**
-
-#### Added
-- ✅ Automatic tool download and configuration
-- ✅ One-click FFmpeg, MKVToolNix, AtomicParsley setup
-- ✅ Portable UserData folder storage
-- ✅ Tool availability status indicators
-
-#### Changed
-- ✅ Rebranded from MyPay to MyMeta
-- ✅ Smaller initial download (tools downloaded on-demand)
-- ✅ Improved sidebar with soft glow effect
-- ✅ Enhanced button organization
+### Technical
+- Flutter Windows desktop application
+- Material Design 3 theming
+- Provider state management
+- SQLite database
+- Multi-threaded processing
+- External process management
+- HTTP client for API calls
+- XML parsing for AniDB
+- JSON parsing for TMDB/OMDb/Jikan
 
 ---
 
-## 📋 TODO
+## Release Notes Format
 
-### High Priority
-- [ ] Add unit tests for core components
-- [ ] Implement keyboard shortcuts (Ctrl+O, Ctrl+M, Ctrl+R, Ctrl+Z)
-- [ ] Add progress bars for batch operations
-- [ ] Improve error handling and user feedback
+### Added
+New features and capabilities
 
-### Medium Priority
-- [ ] Add preview before rename feature
-- [ ] Implement watch folder automation
-- [ ] Add metadata validation
-- [ ] Create comprehensive logging system
+### Fixed  
+Bug fixes and corrections
 
-### Low Priority
-- [ ] Cross-platform support (macOS, Linux)
-- [ ] Multi-language support
-- [ ] Advanced search filters
-- [ ] Custom metadata fields
+### Changed
+Changes to existing functionality
 
-### UI/UX Enhancements
-- [ ] Improved file list virtualization for large batches
-- [ ] Drag-to-reorder file list
-- [ ] Bulk metadata editing
-- [ ] Metadata templates/presets
+### Deprecated
+Features marked for removal
 
----
+### Removed
+Features removed
 
-## ✅ DO's
-
-### Code Organization
-- ✅ **DO** use existing markdown files (README.md, QUICK_START.md, ARCHITECTURE.md, CHANGELOG.md)
-- ✅ **DO** update existing files rather than creating new documentation
-- ✅ **DO** follow DRY (Don't Repeat Yourself) principles
-- ✅ **DO** understand the architecture before making changes
-- ✅ **DO** use centralized components from `widgets/app_card.dart`
-- ✅ **DO** extract common patterns into reusable widgets
-- ✅ **DO** keep single source of truth for styling
-
-### UI Development
-- ✅ **DO** use `AppCard` for all card-based layouts
-- ✅ **DO** use `AppCardHeader` for inline title + description
-- ✅ **DO** use `AppSettingRow` for settings with controls
-- ✅ **DO** use `AppLabeledInput` for labeled input fields
-- ✅ **DO** display labels and descriptions inline (not stacked)
-- ✅ **DO** use theme-aware colors (AppColors)
-- ✅ **DO** maintain baseline text alignment
-
-### State Management
-- ✅ **DO** use Provider for app-wide state
-- ✅ **DO** notify listeners when state changes
-- ✅ **DO** use `context.watch<>()` for reactive updates
-- ✅ **DO** use `context.read<>()` for one-time reads
-
-### File Management
-- ✅ **DO** validate file paths and permissions
-- ✅ **DO** handle errors gracefully with user feedback
-- ✅ **DO** use async/await for file operations
-- ✅ **DO** cleanup temporary files
-
-### Testing
-- ✅ **DO** test edge cases (large files, special characters, etc.)
-- ✅ **DO** test on both Windows 10 and 11
-- ✅ **DO** verify FFmpeg operations succeed
-- ✅ **DO** test undo functionality
-
----
-
-## ❌ DON'Ts
-
-### Code Organization
-- ❌ **DON'T** create new markdown files - use existing ones
-- ❌ **DON'T** duplicate code - create reusable components instead
-- ❌ **DON'T** create custom card/header widgets - use centralized ones
-- ❌ **DON'T** ignore existing architecture patterns
-- ❌ **DON'T** hardcode values - use theme constants
-
-### UI Development
-- ❌ **DON'T** stack title and description vertically - use inline layout
-- ❌ **DON'T** create one-off card designs - maintain consistency
-- ❌ **DON'T** use hardcoded colors - use AppColors and theme
-- ❌ **DON'T** ignore accessibility (contrast, font sizes)
-- ❌ **DON'T** create complex nested widgets - keep them simple
-
-### State Management
-- ❌ **DON'T** update state without notifying listeners
-- ❌ **DON'T** use global variables for state
-- ❌ **DON'T** create unnecessary state objects
-- ❌ **DON'T** forget to dispose controllers and listeners
-
-### File Operations
-- ❌ **DON'T** modify files without user confirmation
-- ❌ **DON'T** leave temporary files lying around
-- ❌ **DON'T** assume file paths are valid without checking
-- ❌ **DON'T** block UI during long operations
-
-### Performance
-- ❌ **DON'T** rebuild entire widget trees unnecessarily
-- ❌ **DON'T** load all files into memory at once
-- ❌ **DON'T** make synchronous API calls
-- ❌ **DON'T** re-encode video (always use codec copy)
-
----
-
-## 🎯 Best Practices
-
-### Component Development
-1. Check if a reusable component exists before creating new one
-2. If creating new component, make it reusable and generic
-3. Document component usage with examples
-4. Keep components focused on single responsibility
-5. Use composition over inheritance
-
-### Code Review Checklist
-- [ ] Uses existing reusable components
-- [ ] Follows DRY principles
-- [ ] Maintains inline header/description layout
-- [ ] Uses theme-aware colors
-- [ ] Properly disposes resources
-- [ ] Handles errors with user feedback
-- [ ] Updates relevant documentation
-
-### Documentation Updates
-When making changes:
-1. Update ARCHITECTURE.md for structural changes
-2. Update README.md for user-facing features
-3. Update QUICK_START.md for workflow changes
-4. Update this CHANGELOG.md with changes
-
----
-
-## 📚 Resources
-
-- [Flutter Documentation](https://flutter.dev/docs)
-- [Provider Package](https://pub.dev/packages/provider)
-- [FFmpeg Documentation](https://ffmpeg.org/documentation.html)
-- [Material Design Guidelines](https://material.io/design)
-
----
-
-## 🔄 Version History
-
-### v1.0.0 (2025-12-23)
-- Initial public release with zero lint issues
-- Full metadata integration (TMDB, OMDb, AniDB)
-- One-click tool setup
-- MIT licensed with proper third-party attributions
-
-### v0.9.x (Internal Development)
-- UI architecture refactoring
-- Custom titlebar and accent color system
-- One-click tool setup development
-- MyMeta rebrand from original project
-
----
-
-<div align="center">
-
-**MyMeta Changelog**
-
-Keep improving, keep it clean
-
-[README](README.md) | [Quick Start](QUICK_START.md) | [Architecture](ARCHITECTURE.md)
-
-</div>
+### Security
+Security-related changes

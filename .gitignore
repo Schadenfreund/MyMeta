@@ -31,10 +31,11 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+/releases/
 /coverage/
 
 # Symbolication related
-app.*.symbols
+app.*.symbolss
 
 # Obfuscation related
 app.*.map.json
@@ -54,3 +55,5 @@ assets/*.exe
 UserData/
 API.txt
 
+# Personal developer notes (not for repo)
+HOW_TO_UPDATE.md

@@ -57,6 +57,16 @@ class FileStateService with ChangeNotifier {
   Future<void> matchFiles(SettingsService settings) async {
     if (_inputFiles.isEmpty) return;
 
+    // Validation: Check if at least one API is configured
+    bool hasAnyApi = settings.tmdbApiKey.isNotEmpty ||
+        settings.omdbApiKey.isNotEmpty ||
+        settings.anidbClientId.isNotEmpty;
+
+    if (!hasAnyApi) {
+      debugPrint('⚠️ No API keys configured for batch matching');
+      return;
+    }
+
     _isLoading = true;
     notifyListeners();
 
@@ -87,16 +97,49 @@ class FileStateService with ChangeNotifier {
   }
 
   // Match a single file by index
-  Future<void> matchSingleFile(int index, SettingsService settings) async {
+  Future<void> matchSingleFile(
+    int index,
+    SettingsService settings, {
+    int? overrideSeason,
+    int? overrideEpisode,
+  }) async {
     if (index < 0 || index >= _inputFiles.length) return;
+
+    // Validation: Check if at least one API is configured
+    bool hasAnyApi = settings.tmdbApiKey.isNotEmpty ||
+        settings.omdbApiKey.isNotEmpty ||
+        settings.anidbClientId.isNotEmpty;
+
+    if (!hasAnyApi) {
+      debugPrint('⚠️ No API keys configured for metadata search');
+      return;
+    }
 
     _isLoading = true;
     notifyListeners();
 
     try {
+      // Get the original file
+      final originalFile = _inputFiles[index];
+
+      // Create a MediaRecord with overridden season/episode if provided
+      final MediaRecord fileToMatch;
+      if (overrideSeason != null || overrideEpisode != null) {
+        debugPrint(
+            '🔄 Using overridden season/episode for search: S${overrideSeason ?? originalFile.season}E${overrideEpisode ?? originalFile.episode}');
+        // Create a copy with overridden values
+        fileToMatch = MediaRecord.withOverrides(
+          originalFile.fullFilePath,
+          season: overrideSeason,
+          episode: overrideEpisode,
+        );
+      } else {
+        fileToMatch = originalFile;
+      }
+
       // Match just this one file
       List<MatchResult> results = await CoreBackend.matchTitles(
-        [_inputFiles[index]], // Match single file
+        [fileToMatch], // Match with potentially overridden values
         seriesFormat: settings.seriesFormat,
         movieFormat: settings.movieFormat,
         tmdbApiKey: settings.tmdbApiKey,

@@ -25,6 +25,8 @@ class _RenamerPageState extends State<RenamerPage> {
       {}; // Track which items have successful metadata searches
   final Set<int> _renamingIndices =
       {}; // Track which items are currently being renamed
+  final Set<int> _autoMatchedIndices =
+      {}; // Track which items were auto-matched via "Search All"
 
   Future<void> _pickFiles(BuildContext context) async {
     // Read context values BEFORE any async operations
@@ -75,6 +77,8 @@ class _RenamerPageState extends State<RenamerPage> {
       final toAddSearched = <int>{};
       final toRemoveRenaming = <int>{};
       final toAddRenaming = <int>{};
+      final toRemoveAutoMatched = <int>{};
+      final toAddAutoMatched = <int>{};
 
       for (int idx in _searchedIndices) {
         if (idx == index) {
@@ -94,10 +98,21 @@ class _RenamerPageState extends State<RenamerPage> {
         }
       }
 
+      for (int idx in _autoMatchedIndices) {
+        if (idx == index) {
+          toRemoveAutoMatched.add(idx);
+        } else if (idx > index) {
+          toRemoveAutoMatched.add(idx);
+          toAddAutoMatched.add(idx - 1);
+        }
+      }
+
       _searchedIndices.removeAll(toRemoveSearched);
       _searchedIndices.addAll(toAddSearched);
       _renamingIndices.removeAll(toRemoveRenaming);
       _renamingIndices.addAll(toAddRenaming);
+      _autoMatchedIndices.removeAll(toRemoveAutoMatched);
+      _autoMatchedIndices.addAll(toAddAutoMatched);
     });
   }
 
@@ -213,23 +228,20 @@ class _RenamerPageState extends State<RenamerPage> {
                     icon: Icons.cloud_download_outlined,
                     tooltip: 'Search All Metadata',
                     onPressed: () async {
-                      // Check if API keys are configured
-                      if (settings.metadataSource == 'tmdb' &&
-                          settings.tmdbApiKey.isEmpty) {
+                      // Smart API selection - use any available API
+                      final hasTmdb = settings.tmdbApiKey.isNotEmpty;
+                      final hasOmdb = settings.omdbApiKey.isNotEmpty;
+                      final hasAnidb = settings.anidbClientId.isNotEmpty;
+
+                      if (!hasTmdb && !hasOmdb && !hasAnidb) {
                         SnackbarHelper.showWarning(
                           context,
-                          'TMDB API key not configured. Go to Settings to add it.',
+                          'No API keys configured. Go to Settings to add at least one (TMDB, OMDb, or AniDB).',
                         );
                         return;
                       }
-                      if (settings.metadataSource == 'omdb' &&
-                          settings.omdbApiKey.isEmpty) {
-                        SnackbarHelper.showWarning(
-                          context,
-                          'OMDB API key not configured. Go to Settings to add it.',
-                        );
-                        return;
-                      }
+
+                      // No validation - matchSingleFile will auto-select available API
 
                       setState(() => _expandedIndex = null);
 
@@ -252,6 +264,8 @@ class _RenamerPageState extends State<RenamerPage> {
                               foundCount++;
                               setState(() {
                                 _searchedIndices.add(i);
+                                _autoMatchedIndices
+                                    .add(i); // Track as auto-matched
                               });
                             }
                           }
@@ -715,18 +729,114 @@ class _RenamerPageState extends State<RenamerPage> {
                     ),
                   ),
 
-                  // Search Button (cloud icon) - always available, resets status if already applied
+                  // Search/Fix Match Button - shows different icon for auto-matched files
                   IconButton(
-                    icon: const Icon(Icons.cloud_download_outlined, size: 20),
+                    icon: Icon(
+                      _autoMatchedIndices.contains(index)
+                          ? Icons.change_circle_outlined
+                          : Icons.cloud_download_outlined,
+                      size: 20,
+                    ),
                     color: settings.accentColor,
                     onPressed: () async {
                       if (isRenamed) {
                         fileState.resetRenamedStatus(index);
                       }
-                      await _performSearch(context, index, input, fileState,
-                          context.read<SettingsService>());
+
+                      // Auto-matched files open Fix Match modal
+                      if (_autoMatchedIndices.contains(index) &&
+                          output?.searchResults != null &&
+                          output!.searchResults!.isNotEmpty) {
+                        // Show Fix Match modal
+                        await showDialog(
+                          context: context,
+                          builder: (context) => Dialog(
+                            child: Container(
+                              width: 700,
+                              height: 600,
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Header
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.search,
+                                        color: settings.accentColor,
+                                        size: 28,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Text(
+                                          'Fix Match',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .headlineSmall,
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.close),
+                                        onPressed: () => Navigator.pop(context),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  // Subtitle
+                                  Text(
+                                    'Select the correct match for: ${input.fileName}',
+                                    style:
+                                        Theme.of(context).textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(height: 24),
+                                  // Search results list
+                                  Expanded(
+                                    child: ListView.builder(
+                                      itemCount: output.searchResults!.length,
+                                      itemBuilder: (context, i) {
+                                        final result = output.searchResults![i];
+                                        return ListTile(
+                                          leading: result.posterUrl != null
+                                              ? Image.network(
+                                                  result.posterUrl!,
+                                                  width: 40,
+                                                  errorBuilder: (_, __, ___) =>
+                                                      const Icon(Icons.movie),
+                                                )
+                                              : const Icon(Icons.movie),
+                                          title:
+                                              Text(result.title ?? 'Unknown'),
+                                          subtitle: Text(
+                                            '${result.year ?? '—'} • ${result.type ?? 'Unknown'}',
+                                          ),
+                                          onTap: () {
+                                            fileState.updateManualMatch(
+                                                index, result);
+                                            setState(() {
+                                              // Remove from auto-matched since user manually selected
+                                              _autoMatchedIndices.remove(index);
+                                              _searchedIndices.add(index);
+                                            });
+                                            Navigator.pop(context);
+                                          },
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      } else {
+                        // Manual search for non-auto-matched files
+                        await _performSearch(context, index, input, fileState,
+                            context.read<SettingsService>());
+                      }
                     },
-                    tooltip: "Search online metadata",
+                    tooltip: _autoMatchedIndices.contains(index)
+                        ? "Fix Match - Select different result"
+                        : "Search online metadata",
                   ),
 
                   // Apply Button (checkmark - shows spinner when processing, green when done)
@@ -895,20 +1005,33 @@ class _RenamerPageState extends State<RenamerPage> {
     FileStateService fileState,
     SettingsService settings,
   ) async {
-    // Check if API keys are configured
-    if (settings.metadataSource == 'tmdb' && settings.tmdbApiKey.isEmpty) {
+    // Smart API selection - use any available API
+    final hasTmdb = settings.tmdbApiKey.isNotEmpty;
+    final hasOmdb = settings.omdbApiKey.isNotEmpty;
+    final hasAnidb = settings.anidbClientId.isNotEmpty;
+
+    if (!hasTmdb && !hasOmdb && !hasAnidb) {
       SnackbarHelper.showWarning(
         context,
-        'TMDB API key not configured. Go to Settings to add it.',
+        'No API keys configured. Go to Settings to add at least one (TMDB, OMDb, or AniDB).',
       );
       return;
     }
-    if (settings.metadataSource == 'omdb' && settings.omdbApiKey.isEmpty) {
-      SnackbarHelper.showWarning(
-        context,
-        'OMDB API key not configured. Go to Settings to add it.',
-      );
-      return;
+
+    // No validation - matchSingleFile will auto-select available API
+
+    // Get current match result to check if user has edited season/episode
+    final currentMatch = fileState.matchResults.length > index
+        ? fileState.matchResults[index]
+        : null;
+
+    // Use edited season/episode if available, otherwise use filename values
+    final searchSeason = currentMatch?.season;
+    final searchEpisode = currentMatch?.episode;
+
+    if (searchSeason != null || searchEpisode != null) {
+      debugPrint(
+          '🔍 Searching with user-edited S${searchSeason}E${searchEpisode}');
     }
 
     SnackbarHelper.showInfo(
@@ -916,7 +1039,12 @@ class _RenamerPageState extends State<RenamerPage> {
       'Searching for "${input.fileName}"...',
     );
 
-    await fileState.matchSingleFile(index, settings);
+    await fileState.matchSingleFile(
+      index,
+      settings,
+      overrideSeason: searchSeason,
+      overrideEpisode: searchEpisode,
+    );
 
     if (!context.mounted) return;
 

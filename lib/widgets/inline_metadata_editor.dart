@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:file_picker/file_picker.dart';
 import '../backend/match_result.dart';
 import '../backend/core_backend.dart';
@@ -53,6 +54,7 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
 
   String _type = 'movie';
   Uint8List? _updatedCoverBytes; // Stores new cover when user changes it
+  bool _pendingSave = false; // Prevents multiple simultaneous saves
 
   @override
   void initState() {
@@ -103,6 +105,14 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
       return;
     }
 
+    // Prevent multiple simultaneous saves
+    if (_pendingSave) {
+      debugPrint("ℹ️  Save already pending, skipping");
+      return;
+    }
+
+    _pendingSave = true;
+
     List<String>? genres = _genresController.text.isNotEmpty
         ? _genresController.text
             .split(',')
@@ -150,7 +160,13 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
     );
 
     debugPrint("📤 Calling onSave with title: ${result.title}");
-    widget.onSave(result);
+    // Defer the save to avoid setState during build
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        widget.onSave(result);
+        _pendingSave = false; // Reset flag after save completes
+      }
+    });
   }
 
   /// Detects if content is Movie or TV Show based on available data
@@ -183,30 +199,35 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
     super.didUpdateWidget(oldWidget);
     if (widget.initialResult != oldWidget.initialResult) {
       final res = widget.initialResult;
-      // Update all controllers with new values
-      _nameController.text = res.newName;
-      _posterUrlController.text = res.posterUrl ?? "";
-      _titleController.text = res.title ?? "";
-      _yearController.text = res.year?.toString() ?? "";
-      _seasonController.text = res.season?.toString() ?? "";
-      _episodeController.text = res.episode?.toString() ?? "";
-      _episodeTitleController.text = res.episodeTitle ?? "";
-      _descriptionController.text = res.description ?? "";
-      _genresController.text = res.genres?.join(', ') ?? "";
-      _directorController.text = res.director ?? "";
-      _actorsController.text = res.actors?.join(', ') ?? "";
-      _ratingController.text = res.rating?.toString() ?? "";
-      _contentRatingController.text = res.contentRating ?? "";
-      _runtimeController.text = res.runtime?.toString() ?? "";
 
-      // Reset cover bytes so it uses new data from search
-      _updatedCoverBytes = null;
+      // Only update controllers if values actually changed to prevent save loops
+      // This prevents: save → parent rebuild → didUpdateWidget → controller update → save
+      if (_titleController.text != (res.title ?? "")) {
+        _nameController.text = res.newName;
+        _posterUrlController.text = res.posterUrl ?? "";
+        _titleController.text = res.title ?? "";
+        _yearController.text = res.year?.toString() ?? "";
+        _seasonController.text = res.season?.toString() ?? "";
+        _episodeController.text = res.episode?.toString() ?? "";
+        _episodeTitleController.text = res.episodeTitle ?? "";
+        _descriptionController.text = res.description ?? "";
+        _genresController.text = res.genres?.join(', ') ?? "";
+        _directorController.text = res.director ?? "";
+        _actorsController.text = res.actors?.join(', ') ?? "";
+        _ratingController.text = res.rating?.toString() ?? "";
+        _contentRatingController.text = res.contentRating ?? "";
+        _runtimeController.text = res.runtime?.toString() ?? "";
 
-      // Also update internal state if needed
-      if ((res.type == 'movie' || res.type == 'episode') && res.type != _type) {
-        setState(() {
-          _type = res.type!;
-        });
+        // Reset cover bytes so it uses new data from search
+        _updatedCoverBytes = null;
+
+        // Also update internal state if needed
+        if ((res.type == 'movie' || res.type == 'episode') &&
+            res.type != _type) {
+          setState(() {
+            _type = res.type!;
+          });
+        }
       }
     }
   }
@@ -312,7 +333,7 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
             children: [
               Icon(Icons.photo_library_outlined, size: 18),
               SizedBox(width: 8),
-              Text('Browse Gallery'),
+              Text('Alternative Covers'),
             ],
           ),
         ),
@@ -419,7 +440,14 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
         ),
       );
     } else {
-      widget.onSearch?.call();
+      // No alternative covers available
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'No alternative covers available. Try searching online first.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -936,7 +964,7 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
                           Expanded(
                             child: _buildTextField(
                               _contentRatingController,
-                              "Rating",
+                              "Age Rating",
                               hint: "PG-13",
                             ),
                           ),
