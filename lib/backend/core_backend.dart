@@ -209,6 +209,15 @@ class CoreBackend {
               }
             }
 
+            // Debug: Log what we're about to add
+            debugPrint('📝 Creating TV MatchResult:');
+            debugPrint('   Title: ${result['name']}');
+            debugPrint(
+                '   Year: ${result['first_air_date']?.substring(0, 4) ?? "null"}');
+            debugPrint('   Rating: $rating');
+            debugPrint('   Content Rating: $contentRating');
+            debugPrint('   Genres: ${genres?.join(", ") ?? "null"}');
+
             results.add(
               MatchResult(
                 newName: result['name'] ?? 'Unknown',
@@ -1006,8 +1015,12 @@ class CoreBackend {
 
       // Extract metadata - check multiple variations
       String? title = tags['title'] ?? tags['TITLE'];
-      String? yearStr =
-          tags['year'] ?? tags['date'] ?? tags['YEAR'] ?? tags['DATE'];
+      String? yearStr = tags['year'] ??
+          tags['date'] ??
+          tags['YEAR'] ??
+          tags['DATE'] ??
+          tags['DATE_RELEASED'] ?? // MKV standard tag
+          tags['date_released'];
       int? year;
       if (yearStr != null) {
         year = int.tryParse(yearStr.toString().substring(0, 4));
@@ -1038,7 +1051,10 @@ class CoreBackend {
         rating = double.tryParse(ratingStr);
       }
 
-      String? contentRating = tags['content_rating'] ?? tags['CONTENT_RATING'];
+      String? contentRating = tags['content_rating'] ??
+          tags['CONTENT_RATING'] ??
+          tags['LAW_RATING'] ?? // MKV standard tag
+          tags['law_rating'];
 
       // TV Show metadata - check MANY variations!
       String? show = tags['show'] ??
@@ -1480,6 +1496,7 @@ class CoreBackend {
       addTag('DIRECTOR', metadata.director);
       if (metadata.actors != null && metadata.actors!.isNotEmpty)
         addTag('ACTOR', metadata.actors!.join(', '));
+      if (metadata.rating != null) addTag('RATING', metadata.rating.toString());
       addTag('LAW_RATING', metadata.contentRating);
       if (metadata.season != null && metadata.episode != null) {
         addTag('CONTENT_TYPE', 'TV Show');

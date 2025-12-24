@@ -3,10 +3,12 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:provider/provider.dart';
+import 'package:http/http.dart' as http;
 import '../services/settings_service.dart';
 import '../services/file_state_service.dart';
 import '../backend/media_record.dart';
 import '../backend/match_result.dart';
+import '../backend/core_backend.dart';
 import '../widgets/inline_metadata_editor.dart';
 import '../theme/app_theme.dart';
 import '../utils/snackbar_helper.dart';
@@ -809,15 +811,22 @@ class _RenamerPageState extends State<RenamerPage> {
                                           subtitle: Text(
                                             '${result.year ?? '—'} • ${result.type ?? 'Unknown'}',
                                           ),
-                                          onTap: () {
-                                            fileState.updateManualMatch(
-                                                index, result);
+                                          onTap: () async {
+                                            Navigator.pop(context);
+                                            // Complete the metadata with cover and formatted name
+                                            await _applyFixMatchResult(
+                                              index,
+                                              result,
+                                              output.searchResults!,
+                                              input,
+                                              fileState,
+                                              settings,
+                                            );
                                             setState(() {
                                               // Remove from auto-matched since user manually selected
                                               _autoMatchedIndices.remove(index);
                                               _searchedIndices.add(index);
                                             });
-                                            Navigator.pop(context);
                                           },
                                         );
                                       },
@@ -1064,5 +1073,84 @@ class _RenamerPageState extends State<RenamerPage> {
         'No match found. Try editing metadata manually.',
       );
     }
+  }
+
+  /// Applies a Fix Match result with complete metadata (cover download + formatted name)
+  Future<void> _applyFixMatchResult(
+    int index,
+    MatchResult selectedResult,
+    List<MatchResult> searchResults,
+    MediaRecord input,
+    FileStateService fileState,
+    SettingsService settings,
+  ) async {
+    debugPrint("🔄 Applying Fix Match result: ${selectedResult.title}");
+
+    MatchResult completeResult = selectedResult;
+
+    // Download cover art if not already present
+    if (completeResult.coverBytes == null &&
+        completeResult.posterUrl != null &&
+        completeResult.posterUrl!.startsWith('http')) {
+      try {
+        debugPrint("📥 Downloading cover for Fix Match result...");
+        final response = await http.get(Uri.parse(completeResult.posterUrl!));
+        if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+          completeResult =
+              completeResult.copyWith(coverBytes: response.bodyBytes);
+          debugPrint("✅ Cover downloaded");
+        }
+      } catch (e) {
+        debugPrint("⚠️ Failed to download cover: $e");
+      }
+    }
+
+    // Generate formatted filename based on the new metadata
+    String format = (completeResult.type == 'episode')
+        ? settings.seriesFormat
+        : settings.movieFormat;
+
+    Map<String, dynamic> contextData = {};
+    if (completeResult.type == 'episode') {
+      contextData = {
+        "series_name": completeResult.title,
+        "year": completeResult.year,
+        "season_number":
+            completeResult.season?.toString().padLeft(2, '0') ?? "00",
+        "episode_number":
+            completeResult.episode?.toString().padLeft(2, '0') ?? "00",
+        "episode_title": completeResult.episodeTitle ?? "",
+      };
+    } else {
+      contextData = {
+        "movie_name": completeResult.title,
+        "year": completeResult.year,
+      };
+    }
+
+    // Get original file extension
+    String extension = "";
+    if (input.fileName.contains('.')) {
+      extension = input.fileName.split('.').last;
+    }
+
+    String newName = CoreBackend.createFormattedTitle(format, contextData);
+    if (extension.isNotEmpty) {
+      newName += ".$extension";
+    }
+
+    // Create final result with formatted name and preserved search results
+    completeResult = completeResult.copyWith(
+      newName: newName,
+      searchResults: searchResults,
+    );
+
+    debugPrint("📋 Final Fix Match result:");
+    debugPrint("   Title: ${completeResult.title}");
+    debugPrint("   NewName: ${completeResult.newName}");
+    debugPrint("   Cover: ${completeResult.coverBytes != null}");
+
+    // Update the match in file state
+    fileState.updateManualMatch(index, completeResult);
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import '../backend/match_result.dart';
 import '../backend/core_backend.dart';
@@ -149,32 +150,48 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
   void initState() {
     super.initState();
     _currentResults = widget.searchResults;
+  }
 
-    // Auto-select first available configured source
-    final settings = context.read<SettingsService>();
-    final hasTmdb = settings.tmdbApiKey.isNotEmpty;
-    final hasOmdb = settings.omdbApiKey.isNotEmpty;
-    final hasAnidb = settings.anidbClientId.isNotEmpty;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
 
-    // Try to detect source from existing results
-    if (_currentResults.isNotEmpty) {
-      if (_currentResults.first.imdbId != null &&
-          _currentResults.first.tmdbId == null &&
-          hasOmdb) {
-        _selectedSource = 'omdb';
-      } else if (_currentResults.first.tmdbId != null && hasTmdb) {
-        _selectedSource = 'tmdb';
-      } else if (hasAnidb) {
-        _selectedSource = 'anidb';
-      }
-    } else {
-      // No results yet, pick first available source
-      if (hasTmdb) {
-        _selectedSource = 'tmdb';
-      } else if (hasOmdb) {
-        _selectedSource = 'omdb';
-      } else if (hasAnidb) {
-        _selectedSource = 'anidb';
+    // Only run once
+    if (_selectedSource == 'tmdb') {
+      // Auto-select first available configured source
+      final settings = context.read<SettingsService>();
+      final hasTmdb = settings.tmdbApiKey.isNotEmpty;
+      final hasOmdb = settings.omdbApiKey.isNotEmpty;
+      final hasAnidb = settings.anidbClientId.isNotEmpty;
+
+      // Try to detect source from existing results
+      if (_currentResults.isNotEmpty) {
+        if (_currentResults.first.imdbId != null &&
+            _currentResults.first.tmdbId == null &&
+            hasOmdb) {
+          _selectedSource = 'omdb';
+        } else if (_currentResults.first.tmdbId != null && hasTmdb) {
+          _selectedSource = 'tmdb';
+        } else if (hasAnidb) {
+          _selectedSource = 'anidb';
+        }
+      } else {
+        // No results yet, pick first available source
+        if (hasTmdb) {
+          _selectedSource = 'tmdb';
+        } else if (hasOmdb) {
+          _selectedSource = 'omdb';
+        } else if (hasAnidb) {
+          _selectedSource = 'anidb';
+        }
+
+        // Automatically search if no results provided
+        if (_currentResults.isEmpty) {
+          // Defer search to next frame to avoid setState during build
+          SchedulerBinding.instance.addPostFrameCallback((_) {
+            _performSearch();
+          });
+        }
       }
     }
   }
@@ -522,6 +539,8 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
                                       )
                                     : const Icon(Icons.chevron_right),
                                 onTap: () {
+                                  debugPrint(
+                                      '📌 User selected result: ${result.title}');
                                   widget.onSelected(result);
                                   Navigator.pop(context);
                                 },

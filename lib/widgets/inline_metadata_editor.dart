@@ -199,10 +199,41 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
     super.didUpdateWidget(oldWidget);
     if (widget.initialResult != oldWidget.initialResult) {
       final res = widget.initialResult;
+      final old = oldWidget.initialResult;
 
-      // Only update controllers if values actually changed to prevent save loops
-      // This prevents: save → parent rebuild → didUpdateWidget → controller update → save
-      if (_titleController.text != (res.title ?? "")) {
+      // Check if any significant field has changed from the parent
+      // This prevents save loops while still allowing external updates
+      bool hasSignificantChange = res.title != old.title ||
+          res.year != old.year ||
+          res.season != old.season ||
+          res.episode != old.episode ||
+          res.episodeTitle != old.episodeTitle ||
+          res.description != old.description ||
+          res.director != old.director ||
+          res.rating != old.rating ||
+          res.contentRating != old.contentRating ||
+          res.runtime != old.runtime ||
+          res.posterUrl != old.posterUrl ||
+          res.coverBytes != old.coverBytes ||
+          !_listEquals(res.genres, old.genres) ||
+          !_listEquals(res.actors, old.actors);
+
+      if (hasSignificantChange) {
+        debugPrint(
+            "📥 InlineMetadataEditor: Received updated data from parent");
+
+        // Temporarily remove listeners to prevent save loops during update
+        _titleController.removeListener(_saveChanges);
+        _yearController.removeListener(_saveChanges);
+        _seasonController.removeListener(_saveChanges);
+        _episodeController.removeListener(_saveChanges);
+        _episodeTitleController.removeListener(_saveChanges);
+        _descriptionController.removeListener(_saveChanges);
+        _genresController.removeListener(_saveChanges);
+        _directorController.removeListener(_saveChanges);
+        _actorsController.removeListener(_saveChanges);
+
+        // Update all controllers with new values
         _nameController.text = res.newName;
         _posterUrlController.text = res.posterUrl ?? "";
         _titleController.text = res.title ?? "";
@@ -218,10 +249,26 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
         _contentRatingController.text = res.contentRating ?? "";
         _runtimeController.text = res.runtime?.toString() ?? "";
 
-        // Reset cover bytes so it uses new data from search
-        _updatedCoverBytes = null;
+        // Update cover bytes if provided
+        if (res.coverBytes != null) {
+          _updatedCoverBytes = res.coverBytes;
+        } else if (res.posterUrl != old.posterUrl) {
+          // Reset cover bytes so it uses new URL
+          _updatedCoverBytes = null;
+        }
 
-        // Also update internal state if needed
+        // Re-add listeners
+        _titleController.addListener(_saveChanges);
+        _yearController.addListener(_saveChanges);
+        _seasonController.addListener(_saveChanges);
+        _episodeController.addListener(_saveChanges);
+        _episodeTitleController.addListener(_saveChanges);
+        _descriptionController.addListener(_saveChanges);
+        _genresController.addListener(_saveChanges);
+        _directorController.addListener(_saveChanges);
+        _actorsController.addListener(_saveChanges);
+
+        // Update type if needed
         if ((res.type == 'movie' || res.type == 'episode') &&
             res.type != _type) {
           setState(() {
@@ -230,6 +277,17 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
         }
       }
     }
+  }
+
+  /// Helper to compare two lists for equality
+  bool _listEquals<T>(List<T>? a, List<T>? b) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   @override
@@ -453,266 +511,279 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
 
   /// Open search results dialog
   void _openSearchResults() {
-    if (widget.initialResult.searchResults != null &&
-        widget.initialResult.searchResults!.isNotEmpty) {
-      showDialog(
-        context: context,
-        builder: (context) => SearchResultsPickerModal(
-          searchResults: widget.initialResult.searchResults!,
-          currentResult: widget.initialResult,
-          onSelected: (selectedResult) async {
-            debugPrint("🔄 Search result selected: ${selectedResult.title}");
+    // Always open modal immediately - empty list triggers auto-search
+    showDialog(
+      context: context,
+      builder: (dialogContext) => SearchResultsPickerModal(
+        searchResults: widget.initialResult.searchResults ?? [],
+        currentResult: widget.initialResult,
+        onSelected: (selectedResult) async {
+          debugPrint("🔄 Search result selected: ${selectedResult.title}");
 
-            // Check if selectedResult already has complete metadata
-            // (from centralized search via toggle)
-            bool hasCompleteMetadata = selectedResult.description != null ||
-                selectedResult.genres != null ||
-                selectedResult.actors != null;
+          // Check if selectedResult already has complete metadata
+          bool hasCompleteMetadata = selectedResult.description != null ||
+              selectedResult.genres != null ||
+              selectedResult.actors != null;
 
-            MatchResult fullMetadata = selectedResult;
+          MatchResult fullMetadata = selectedResult;
 
-            // For TV shows with season/episode, ALWAYS fetch episode title
-            // even if other metadata is complete
-            bool needsEpisodeFetch = selectedResult.type == 'episode' &&
-                selectedResult.season != null &&
-                selectedResult.episode != null &&
-                selectedResult.tmdbId != null;
+          // For TV shows with season/episode, ALWAYS fetch episode title
+          bool needsEpisodeFetch = selectedResult.type == 'episode' &&
+              selectedResult.season != null &&
+              selectedResult.episode != null &&
+              selectedResult.tmdbId != null;
 
-            // Only fetch additional details if metadata is incomplete OR we need episode title
-            if ((!hasCompleteMetadata || needsEpisodeFetch) &&
-                selectedResult.tmdbId != null) {
-              final settings = context.read<SettingsService>();
-              debugPrint(
-                  "📡 Fetching full details for tmdbId: ${selectedResult.tmdbId}");
-
-              try {
-                if (selectedResult.type == 'episode') {
-                  // Fetch TV show details
-                  final tmdb = TmdbService(settings.tmdbApiKey);
-                  final details =
-                      await tmdb.getTVDetails(selectedResult.tmdbId!);
-                  final posters =
-                      await tmdb.getTVPosters(selectedResult.tmdbId!);
-
-                  String? episodeTitle = selectedResult.episodeTitle;
-
-                  // Fetch episode title for this specific show
-                  if (selectedResult.season != null &&
-                      selectedResult.episode != null) {
-                    debugPrint(
-                        '🔎 Fetching episode S${selectedResult.season}E${selectedResult.episode} for selected show');
-                    try {
-                      final episodeLookup = await tmdb.getEpisodeLookup(
-                          selectedResult.tmdbId!, [selectedResult.season!]);
-                      String key =
-                          "S${selectedResult.season}E${selectedResult.episode}";
-                      if (episodeLookup.containsKey(key)) {
-                        episodeTitle = episodeLookup[key];
-                        debugPrint('✅ Fetched episode title: $episodeTitle');
-                      } else {
-                        debugPrint(
-                            '⚠️ Episode $key not found - clearing title');
-                        episodeTitle = null;
-                      }
-                    } catch (e) {
-                      debugPrint('Error fetching episode title: $e');
-                      episodeTitle = null;
-                    }
-                  }
-
-                  if (details != null) {
-                    fullMetadata = MatchResult(
-                      newName: selectedResult.newName,
-                      posterUrl: selectedResult.posterUrl,
-                      title: details['name'] ?? selectedResult.title,
-                      year: selectedResult.year,
-                      season: selectedResult.season,
-                      episode: selectedResult.episode,
-                      episodeTitle: episodeTitle,
-                      type: 'episode',
-                      description:
-                          details['overview'] ?? selectedResult.description,
-                      genres: hasCompleteMetadata
-                          ? selectedResult.genres
-                          : TmdbService.extractGenres(details),
-                      actors: hasCompleteMetadata
-                          ? selectedResult.actors
-                          : TmdbService.extractCast(details),
-                      rating: details['vote_average']?.toDouble() ??
-                          selectedResult.rating,
-                      contentRating: hasCompleteMetadata
-                          ? selectedResult.contentRating
-                          : TmdbService.extractContentRating(details, true),
-                      runtime: details['episode_run_time']?.isNotEmpty == true
-                          ? details['episode_run_time'][0]
-                          : selectedResult.runtime,
-                      tmdbId: selectedResult.tmdbId,
-                      alternativePosterUrls: posters.isNotEmpty
-                          ? posters
-                          : selectedResult.alternativePosterUrls,
-                      searchResults: widget.initialResult.searchResults,
-                    );
-                    debugPrint(
-                        "✅ Fetched full TV details with ${fullMetadata.genres?.length ?? 0} genres");
-                  }
-                } else {
-                  // Fetch movie details
-                  final tmdb = TmdbService(settings.tmdbApiKey);
-                  final details =
-                      await tmdb.getMovieDetails(selectedResult.tmdbId!);
-                  final posters =
-                      await tmdb.getMoviePosters(selectedResult.tmdbId!);
-
-                  if (details != null) {
-                    fullMetadata = MatchResult(
-                      newName: selectedResult.newName,
-                      posterUrl: details['poster_path'] != null
-                          ? "https://image.tmdb.org/t/p/w500${details['poster_path']}"
-                          : selectedResult.posterUrl,
-                      title: details['title'] ?? selectedResult.title,
-                      year: selectedResult.year,
-                      type: 'movie',
-                      description: details['overview'],
-                      genres: TmdbService.extractGenres(details),
-                      actors: TmdbService.extractCast(details),
-                      director: TmdbService.extractDirector(details),
-                      rating: details['vote_average']?.toDouble(),
-                      contentRating:
-                          TmdbService.extractContentRating(details, false),
-                      runtime: details['runtime'],
-                      studio:
-                          details['production_companies']?.isNotEmpty == true
-                              ? details['production_companies'][0]['name']
-                              : null,
-                      tmdbId: selectedResult.tmdbId,
-                      imdbId: details['imdb_id'],
-                      alternativePosterUrls: posters,
-                      searchResults: widget.initialResult.searchResults,
-                    );
-                    debugPrint(
-                        "✅ Fetched full movie details with ${fullMetadata.genres?.length ?? 0} genres");
-                  }
-                }
-              } catch (e) {
-                debugPrint("⚠️ Error fetching full details: $e");
-              }
-            } else if (hasCompleteMetadata) {
-              debugPrint("✅ Using complete metadata from search result");
-            }
-
-            // Download cover art if available
-            if (fullMetadata.posterUrl != null &&
-                fullMetadata.posterUrl!.startsWith('http')) {
-              try {
-                final response =
-                    await http.get(Uri.parse(fullMetadata.posterUrl!));
-                if (response.statusCode == 200) {
-                  fullMetadata = MatchResult(
-                    newName: fullMetadata.newName,
-                    posterUrl: fullMetadata.posterUrl,
-                    coverBytes: response.bodyBytes,
-                    title: fullMetadata.title,
-                    year: fullMetadata.year,
-                    season: fullMetadata.season,
-                    episode: fullMetadata.episode,
-                    episodeTitle: fullMetadata.episodeTitle,
-                    type: fullMetadata.type,
-                    description: fullMetadata.description,
-                    genres: fullMetadata.genres,
-                    director: fullMetadata.director,
-                    actors: fullMetadata.actors,
-                    rating: fullMetadata.rating,
-                    contentRating: fullMetadata.contentRating,
-                    runtime: fullMetadata.runtime,
-                    studio: fullMetadata.studio,
-                    tmdbId: fullMetadata.tmdbId,
-                    imdbId: fullMetadata.imdbId,
-                    alternativePosterUrls: fullMetadata.alternativePosterUrls,
-                    searchResults: fullMetadata.searchResults,
-                  );
-                  debugPrint("✅ Downloaded cover art");
-                }
-              } catch (e) {
-                debugPrint("⚠️ Failed to download cover: $e");
-              }
-            }
-
+          // Only fetch additional details if metadata is incomplete OR we need episode title
+          if ((!hasCompleteMetadata || needsEpisodeFetch) &&
+              selectedResult.tmdbId != null) {
+            final settings = context.read<SettingsService>();
             debugPrint(
-                "   Final - Description: ${fullMetadata.description != null}");
-            debugPrint("   Final - Cover: ${fullMetadata.coverBytes != null}");
-            debugPrint("   Final - Rating: ${fullMetadata.rating}");
-            debugPrint("   Final - Genres: ${fullMetadata.genres?.join(', ')}");
-            debugPrint("   Final - Season: ${fullMetadata.season}");
-            debugPrint("   Final - Episode: ${fullMetadata.episode}");
-            debugPrint("   Final - EpisodeTitle: ${fullMetadata.episodeTitle}");
+                "📡 Fetching full details for tmdbId: ${selectedResult.tmdbId}");
 
-            if (!mounted) return;
-
-            // Temporarily remove all listeners
-            _titleController.removeListener(_saveChanges);
-            _yearController.removeListener(_saveChanges);
-            _seasonController.removeListener(_saveChanges);
-            _episodeController.removeListener(_saveChanges);
-            _episodeTitleController.removeListener(_saveChanges);
-            _descriptionController.removeListener(_saveChanges);
-            _genresController.removeListener(_saveChanges);
-            _directorController.removeListener(_saveChanges);
-            _actorsController.removeListener(_saveChanges);
-
-            // Update ALL fields from full metadata
-            _titleController.text = fullMetadata.title ?? "";
-            _yearController.text = fullMetadata.year?.toString() ?? "";
-            _seasonController.text = fullMetadata.season?.toString() ?? "";
-            _episodeController.text = fullMetadata.episode?.toString() ?? "";
-            _episodeTitleController.text = fullMetadata.episodeTitle ?? "";
-            _descriptionController.text = fullMetadata.description ?? "";
-            _genresController.text = fullMetadata.genres?.join(', ') ?? "";
-            _directorController.text = fullMetadata.director ?? "";
-            _actorsController.text = fullMetadata.actors?.join(', ') ?? "";
-            _ratingController.text = fullMetadata.rating?.toString() ?? "";
-            _contentRatingController.text = fullMetadata.contentRating ?? "";
-            _runtimeController.text = fullMetadata.runtime?.toString() ?? "";
-            _posterUrlController.text = fullMetadata.posterUrl ?? "";
-
-            // Update cover bytes if available
-            if (fullMetadata.coverBytes != null) {
-              _updatedCoverBytes = fullMetadata.coverBytes;
-              debugPrint("✅ Updated cover bytes");
-            } else {
-              _updatedCoverBytes = null;
+            try {
+              if (selectedResult.type == 'episode') {
+                fullMetadata = await _fetchTVDetails(
+                    selectedResult, settings, hasCompleteMetadata);
+              } else {
+                fullMetadata =
+                    await _fetchMovieDetails(selectedResult, settings);
+              }
+            } catch (e) {
+              debugPrint("⚠️ Error fetching full details: $e");
             }
+          } else if (hasCompleteMetadata) {
+            debugPrint("✅ Using complete metadata from search result");
+            // Ensure searchResults are preserved from current widget
+            fullMetadata = selectedResult.copyWith(
+              searchResults: widget.initialResult.searchResults,
+            );
+          }
 
-            // Update type and trigger rebuild
-            if (mounted) {
-              setState(() {
-                _type = fullMetadata.type ?? 'movie';
-              });
+          // Download cover art if available
+          if (fullMetadata.posterUrl != null &&
+              fullMetadata.posterUrl!.startsWith('http') &&
+              fullMetadata.coverBytes == null) {
+            try {
+              final response =
+                  await http.get(Uri.parse(fullMetadata.posterUrl!));
+              if (response.statusCode == 200) {
+                fullMetadata =
+                    fullMetadata.copyWith(coverBytes: response.bodyBytes);
+                debugPrint("✅ Downloaded cover art");
+              }
+            } catch (e) {
+              debugPrint("⚠️ Failed to download cover: $e");
             }
+          }
 
-            // Re-add all listeners
-            _titleController.addListener(_saveChanges);
-            _yearController.addListener(_saveChanges);
-            _seasonController.addListener(_saveChanges);
-            _episodeController.addListener(_saveChanges);
-            _episodeTitleController.addListener(_saveChanges);
-            _descriptionController.addListener(_saveChanges);
-            _genresController.addListener(_saveChanges);
-            _directorController.addListener(_saveChanges);
-            _actorsController.addListener(_saveChanges);
+          if (!mounted) return;
 
-            // Regenerate filename with new metadata
-            _regenerateName();
+          // Generate the new filename based on the metadata
+          final newName = _generateFormattedName(fullMetadata);
+          fullMetadata = fullMetadata.copyWith(newName: newName);
 
-            // Save complete result with all metadata
-            debugPrint("💾 Saving complete result with all metadata...");
-            widget.onSave(fullMetadata);
-            debugPrint("✅ Save complete");
-          },
-        ),
-      );
-    } else {
-      widget.onSearch?.call();
+          debugPrint("📋 Final metadata:");
+          debugPrint("   Title: ${fullMetadata.title}");
+          debugPrint("   Description: ${fullMetadata.description != null}");
+          debugPrint("   Cover: ${fullMetadata.coverBytes != null}");
+          debugPrint("   Genres: ${fullMetadata.genres?.join(', ')}");
+          debugPrint("   NewName: ${fullMetadata.newName}");
+
+          // Update local state and save to parent
+          _applyMetadataToControllers(fullMetadata);
+
+          // Save complete result with all metadata
+          debugPrint("💾 Saving complete result with all metadata...");
+          widget.onSave(fullMetadata);
+          debugPrint("✅ Save complete");
+        },
+      ),
+    );
+  }
+
+  /// Fetches complete TV show details from TMDB
+  Future<MatchResult> _fetchTVDetails(MatchResult selectedResult,
+      SettingsService settings, bool hasCompleteMetadata) async {
+    final tmdb = TmdbService(settings.tmdbApiKey);
+    final details = await tmdb.getTVDetails(selectedResult.tmdbId!);
+    final posters = await tmdb.getTVPosters(selectedResult.tmdbId!);
+
+    String? episodeTitle = selectedResult.episodeTitle;
+    String? episodeDescription = selectedResult.description;
+
+    // Fetch episode-specific details
+    if (selectedResult.season != null && selectedResult.episode != null) {
+      debugPrint(
+          '🔎 Fetching episode S${selectedResult.season}E${selectedResult.episode} details');
+      try {
+        final episodeDetails = await tmdb.getEpisodeDetails(
+          selectedResult.tmdbId!,
+          selectedResult.season!,
+          selectedResult.episode!,
+        );
+
+        if (episodeDetails != null) {
+          episodeTitle = episodeDetails['name'];
+          episodeDescription = episodeDetails['overview'];
+          debugPrint('✅ Fetched episode: $episodeTitle');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Error fetching episode details: $e');
+      }
     }
+
+    if (details != null) {
+      return selectedResult.copyWith(
+        title: details['name'] ?? selectedResult.title,
+        episodeTitle: episodeTitle,
+        type: 'episode',
+        description: episodeDescription ?? details['overview'],
+        genres: hasCompleteMetadata
+            ? selectedResult.genres
+            : TmdbService.extractGenres(details),
+        actors: hasCompleteMetadata
+            ? selectedResult.actors
+            : TmdbService.extractCast(details),
+        rating: details['vote_average']?.toDouble() ?? selectedResult.rating,
+        contentRating: hasCompleteMetadata
+            ? selectedResult.contentRating
+            : TmdbService.extractContentRating(details, true),
+        runtime: details['episode_run_time']?.isNotEmpty == true
+            ? details['episode_run_time'][0]
+            : selectedResult.runtime,
+        alternativePosterUrls:
+            posters.isNotEmpty ? posters : selectedResult.alternativePosterUrls,
+        searchResults: widget.initialResult.searchResults,
+      );
+    }
+    return selectedResult.copyWith(
+        searchResults: widget.initialResult.searchResults);
+  }
+
+  /// Fetches complete movie details from TMDB
+  Future<MatchResult> _fetchMovieDetails(
+      MatchResult selectedResult, SettingsService settings) async {
+    final tmdb = TmdbService(settings.tmdbApiKey);
+    final details = await tmdb.getMovieDetails(selectedResult.tmdbId!);
+    final posters = await tmdb.getMoviePosters(selectedResult.tmdbId!);
+
+    if (details != null) {
+      return selectedResult.copyWith(
+        posterUrl: details['poster_path'] != null
+            ? "https://image.tmdb.org/t/p/w500${details['poster_path']}"
+            : selectedResult.posterUrl,
+        title: details['title'] ?? selectedResult.title,
+        type: 'movie',
+        description: details['overview'],
+        genres: TmdbService.extractGenres(details),
+        actors: TmdbService.extractCast(details),
+        director: TmdbService.extractDirector(details),
+        rating: details['vote_average']?.toDouble(),
+        contentRating: TmdbService.extractContentRating(details, false),
+        runtime: details['runtime'],
+        studio: details['production_companies']?.isNotEmpty == true
+            ? details['production_companies'][0]['name']
+            : null,
+        imdbId: details['imdb_id'],
+        alternativePosterUrls: posters,
+        searchResults: widget.initialResult.searchResults,
+      );
+    }
+    return selectedResult.copyWith(
+        searchResults: widget.initialResult.searchResults);
+  }
+
+  /// Generates a formatted filename based on metadata and user settings
+  String _generateFormattedName(MatchResult metadata) {
+    final settings = context.read<SettingsService>();
+    String format = (metadata.type == 'episode')
+        ? settings.seriesFormat
+        : settings.movieFormat;
+
+    Map<String, dynamic> contextData = {};
+
+    if (metadata.type == 'episode') {
+      contextData = {
+        "series_name": metadata.title,
+        "year": metadata.year,
+        "season_number":
+            metadata.season?.toString().padLeft(2, '0') ?? "00",
+        "episode_number":
+            metadata.episode?.toString().padLeft(2, '0') ?? "00",
+        "episode_title": metadata.episodeTitle ?? "",
+      };
+    } else {
+      contextData = {
+        "movie_name": metadata.title,
+        "year": metadata.year,
+      };
+    }
+
+    // Preserve original extension
+    String extension = "";
+    if (_nameController.text.contains('.')) {
+      extension = _nameController.text.split('.').last;
+    } else if (widget.originalName.contains('.')) {
+      extension = widget.originalName.split('.').last;
+    }
+
+    String newName = CoreBackend.createFormattedTitle(format, contextData);
+    if (extension.isNotEmpty) {
+      newName += ".$extension";
+    }
+
+    return newName;
+  }
+
+  /// Applies metadata to all controllers without triggering save loops
+  void _applyMetadataToControllers(MatchResult metadata) {
+    // Temporarily remove all listeners
+    _titleController.removeListener(_saveChanges);
+    _yearController.removeListener(_saveChanges);
+    _seasonController.removeListener(_saveChanges);
+    _episodeController.removeListener(_saveChanges);
+    _episodeTitleController.removeListener(_saveChanges);
+    _descriptionController.removeListener(_saveChanges);
+    _genresController.removeListener(_saveChanges);
+    _directorController.removeListener(_saveChanges);
+    _actorsController.removeListener(_saveChanges);
+
+    // Update ALL controllers
+    _nameController.text = metadata.newName;
+    _titleController.text = metadata.title ?? "";
+    _yearController.text = metadata.year?.toString() ?? "";
+    _seasonController.text = metadata.season?.toString() ?? "";
+    _episodeController.text = metadata.episode?.toString() ?? "";
+    _episodeTitleController.text = metadata.episodeTitle ?? "";
+    _descriptionController.text = metadata.description ?? "";
+    _genresController.text = metadata.genres?.join(', ') ?? "";
+    _directorController.text = metadata.director ?? "";
+    _actorsController.text = metadata.actors?.join(', ') ?? "";
+    _ratingController.text = metadata.rating?.toString() ?? "";
+    _contentRatingController.text = metadata.contentRating ?? "";
+    _runtimeController.text = metadata.runtime?.toString() ?? "";
+    _posterUrlController.text = metadata.posterUrl ?? "";
+
+    // Update cover bytes
+    _updatedCoverBytes = metadata.coverBytes;
+
+    // Update type and trigger rebuild
+    if (mounted) {
+      setState(() {
+        _type = metadata.type ?? 'movie';
+      });
+    }
+
+    // Re-add all listeners
+    _titleController.addListener(_saveChanges);
+    _yearController.addListener(_saveChanges);
+    _seasonController.addListener(_saveChanges);
+    _episodeController.addListener(_saveChanges);
+    _episodeTitleController.addListener(_saveChanges);
+    _descriptionController.addListener(_saveChanges);
+    _genresController.addListener(_saveChanges);
+    _directorController.addListener(_saveChanges);
+    _actorsController.addListener(_saveChanges);
   }
 
   /// Build no cover placeholder

@@ -164,27 +164,8 @@ class FileStateService with ChangeNotifier {
             debugPrint("📥 Downloading cover for: ${result.title}");
             final response = await http.get(Uri.parse(result.posterUrl!));
             if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
-              // Create new MatchResult with coverBytes
-              result = MatchResult(
-                newName: result.newName,
-                title: result.title,
-                year: result.year,
-                season: result.season,
-                episode: result.episode,
-                episodeTitle: result.episodeTitle,
-                type: result.type,
-                description: result.description,
-                genres: result.genres,
-                director: result.director,
-                actors: result.actors,
-                rating: result.rating,
-                contentRating: result.contentRating,
-                posterUrl: result.posterUrl,
-                tmdbId: result.tmdbId,
-                alternativePosterUrls: result.alternativePosterUrls,
-                searchResults: result.searchResults,
-                coverBytes: response.bodyBytes, // Add downloaded cover
-              );
+              // Use copyWith to preserve all fields while adding cover bytes
+              result = result.copyWith(coverBytes: response.bodyBytes);
               debugPrint(
                   "✅ Cover downloaded (${response.bodyBytes.length} bytes)");
             }
@@ -594,24 +575,8 @@ class FileStateService with ChangeNotifier {
               await CoreBackend.extractCover(filePath, settings: settings);
 
           if (coverBytes != null) {
-            // Update match result with cover bytes
-            _matchResults[i] = MatchResult(
-              newName: match.newName,
-              title: match.title,
-              year: match.year,
-              season: match.season,
-              episode: match.episode,
-              episodeTitle: match.episodeTitle,
-              type: match.type,
-              description: match.description,
-              genres: match.genres,
-              director: match.director,
-              actors: match.actors,
-              rating: match.rating,
-              contentRating: match.contentRating,
-              posterUrl: match.posterUrl,
-              coverBytes: coverBytes, // Add extracted cover
-            );
+            // Update match result with cover bytes using copyWith to preserve all fields
+            _matchResults[i] = match.copyWith(coverBytes: coverBytes);
 
             // Notify UI to update this card
             notifyListeners();

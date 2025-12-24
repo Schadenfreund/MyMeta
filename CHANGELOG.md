@@ -9,7 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Critical: Metadata Reading on Paths with Spaces** - Fixed FFprobe failing to read embedded metadata when project/file paths contain spaces (like "My Drive"). Changed `runInShell` from `true` to `false` to properly handle paths with spaces. Metadata now correctly persists after embedding and can be read on re-import.
+- **Metadata Field Round-Tripping** - Fixed year, rating, and age rating not persisting after embedding. Added proper MKV tag mappings (`DATE_RELEASED`, `LAW_RATING`, `RATING`) so these fields correctly round-trip when writing and re-reading metadata.
+- **Fix Match Modal Responsiveness** - Fixed laggy behavior when clicking Fix Match button. Modal now opens instantly and performs search in background with loading indicator, making the app feel much more responsive.
+- **Fix Match Source Switching** - Fixed issue where changing metadata source in Fix Match modal wouldn't trigger new search. Modal now automatically searches when opened with no results and when source is changed.
 - **Portable App Tool Path Validation** - Added startup validation that checks if saved tool paths are still valid after the app is moved. Automatically attempts to fix paths by searching `UserData/tools`. Clears invalid paths and provides detailed logging. Critical for portable app reliability.
+- **Metadata Editor Field Updates** - Fixed inline metadata editor not reliably updating all fields when new metadata is fetched from online search. Now properly detects changes across all metadata fields (title, year, season, episode, description, genres, actors, rating, etc.) and updates the UI accordingly.
+- **Fix Match Complete Metadata** - Fixed Fix Match modal not downloading cover art or generating formatted filenames when selecting an alternative match. Now properly completes metadata with cover download and applies user's naming format settings.
+- **Search Results Race Conditions** - Fixed race conditions in the search results picker that could cause metadata fields to be lost or incorrectly saved. Refactored to use cleaner async flow with proper state management.
+- **Cover Extraction Field Preservation** - Fixed background cover extraction losing metadata fields (like tmdbId, imdbId, searchResults, alternativePosterUrls) when updating match results with extracted cover bytes.
 
 ### Added
 - **Auto-Update Feature** - Added "Software Updates" card in Settings that checks GitHub Releases for new versions
