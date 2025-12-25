@@ -69,9 +69,9 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
             const SizedBox(height: 16),
             Text(
               'Release Notes:',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Container(
@@ -141,9 +141,9 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
               const SizedBox(width: AppSpacing.sm),
               Text(
                 'Software Updates',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -153,10 +153,10 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
           Text(
             'Check for updates from GitHub Releases. Your settings and tools are preserved during updates.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: isDark
-                      ? AppColors.darkTextSecondary
-                      : AppColors.lightTextSecondary,
-                ),
+              color: isDark
+                  ? AppColors.darkTextSecondary
+                  : AppColors.lightTextSecondary,
+            ),
           ),
           const SizedBox(height: AppSpacing.lg),
 
@@ -186,16 +186,15 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
           TextButton.icon(
             onPressed: () async {
               final url = Uri.parse(
-                  'https://github.com/${UpdateService.repoOwner}/${UpdateService.repoName}/releases');
+                'https://github.com/${UpdateService.repoOwner}/${UpdateService.repoName}/releases',
+              );
               if (await canLaunchUrl(url)) {
                 await launchUrl(url);
               }
             },
             icon: const Icon(Icons.open_in_new, size: 16),
             label: const Text('View All Releases on GitHub'),
-            style: TextButton.styleFrom(
-              foregroundColor: settings.accentColor,
-            ),
+            style: TextButton.styleFrom(foregroundColor: settings.accentColor),
           ),
         ],
       ),
@@ -251,14 +250,17 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
 
   Future<void> _executeUpdateAndExit() async {
     if (_updateService?.updateScriptPath != null) {
-      // Execute the batch script
-      await Process.start(
-        'cmd.exe',
-        ['/c', _updateService!.updateScriptPath!],
-        mode: ProcessStartMode.detached,
-      );
+      // Execute the PowerShell script silently (no visible windows)
+      await Process.start('powershell.exe', [
+        '-ExecutionPolicy',
+        'Bypass',
+        '-WindowStyle',
+        'Hidden',
+        '-File',
+        _updateService!.updateScriptPath!,
+      ], mode: ProcessStartMode.detached);
 
-      // Exit the app - the batch script will handle the rest
+      // Exit the app - the PowerShell script will handle the rest
       exit(0);
     }
   }
@@ -266,9 +268,11 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(_completed
-          ? (_error ? 'Update Failed' : 'Update Complete')
-          : 'Updating MyMeta'),
+      title: Text(
+        _completed
+            ? (_error ? 'Update Failed' : 'Update Complete')
+            : 'Updating MyMeta',
+      ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -284,8 +288,11 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
               textAlign: TextAlign.center,
             ),
           ] else ...[
-            const Icon(Icons.check_circle_outline,
-                color: Colors.green, size: 48),
+            const Icon(
+              Icons.check_circle_outline,
+              color: Colors.green,
+              size: 48,
+            ),
             const SizedBox(height: 16),
             const Text(
               'Update downloaded successfully! Click "Restart Now" to complete the installation.',

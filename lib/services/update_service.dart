@@ -25,18 +25,22 @@ class UpdateService {
       debugPrint('🔍 Checking for updates (current: v$currentVersion)');
 
       // Fetch latest release from GitHub API
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 30),
-      ));
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 30),
+        ),
+      );
       final response = await dio.get(
         'https://api.github.com/repos/$repoOwner/$repoName/releases/latest',
       );
 
       if (response.statusCode == 200) {
         final data = response.data;
-        final latestVersion =
-            (data['tag_name'] as String).replaceFirst('v', '');
+        final latestVersion = (data['tag_name'] as String).replaceFirst(
+          'v',
+          '',
+        );
 
         debugPrint('📦 Latest version on GitHub: v$latestVersion');
 
@@ -68,10 +72,12 @@ class UpdateService {
     try {
       onProgress(0.0, 'Preparing download...');
 
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(minutes: 5),
-      ));
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(minutes: 5),
+        ),
+      );
       final tempDir = await Directory.systemTemp.createTemp('mymeta_update_');
       final zipPath = p.join(tempDir.path, 'update.zip');
 
@@ -84,8 +90,10 @@ class UpdateService {
         onReceiveProgress: (received, total) {
           if (total != -1) {
             final progress = received / total;
-            onProgress(progress * 0.5,
-                'Downloading... ${(progress * 100).toStringAsFixed(0)}%');
+            onProgress(
+              progress * 0.5,
+              'Downloading... ${(progress * 100).toStringAsFixed(0)}%',
+            );
           }
         },
       );
@@ -144,57 +152,64 @@ class UpdateService {
     }
   }
 
-  /// Create a batch script that will perform the update after the app closes
+  /// Create a PowerShell script that will perform the update silently after the app closes
   Future<String> _createUpdateScript(
     String sourcePath,
     String targetPath,
     String exeName,
   ) async {
-    final scriptPath = p.join(targetPath, 'update_mymeta.bat');
+    final scriptPath = p.join(targetPath, 'update_mymeta.ps1');
 
-    // Create batch script content
-    final script = '''
-@echo off
-echo MyMeta Auto-Update Script
-echo =============================
-echo.
-echo Waiting for MyMeta to close...
-timeout /t 2 /nobreak >nul
+    // Escape backslashes for PowerShell
+    final sourcePathEscaped = sourcePath.replaceAll('\\', '\\\\');
+    final targetPathEscaped = targetPath.replaceAll('\\', '\\\\');
 
-:wait_for_close
-tasklist /FI "IMAGENAME eq $exeName" 2>NUL | find /I "$exeName" >NUL
-if "%ERRORLEVEL%"=="0" (
-    timeout /t 1 /nobreak >nul
-    goto wait_for_close
-)
+    // Create PowerShell script content (runs silently)
+    final script =
+        '''
+# MyMeta Auto-Update Script (Silent)
+\$ErrorActionPreference = "SilentlyContinue"
 
-echo.
-echo Installing update...
+# Wait for MyMeta to close
+\$exeName = "$exeName"
+\$processName = \$exeName -replace '\\.exe\$', ''
 
-REM Copy new EXE
-echo - Updating MyMeta.exe...
-xcopy /Y /Q "$sourcePath\\$exeName" "$targetPath\\" >nul
+Start-Sleep -Seconds 2
 
-REM Copy all DLLs
-echo - Updating DLLs...
-xcopy /Y /Q "$sourcePath\\*.dll" "$targetPath\\" >nul
+while (Get-Process -Name \$processName -ErrorAction SilentlyContinue) {
+    Start-Sleep -Seconds 1
+}
 
-REM Copy data folder
-echo - Updating data folder...
-if exist "$targetPath\\data" rmdir /S /Q "$targetPath\\data"
-xcopy /E /I /Y /Q "$sourcePath\\data" "$targetPath\\data" >nul
+# Source and target paths
+\$sourcePath = "$sourcePathEscaped"
+\$targetPath = "$targetPathEscaped"
 
-echo.
-echo Update complete!
-echo Restarting MyMeta...
-timeout /t 1 /nobreak >nul
+# Perform update (copy files silently)
+try {
+    # Copy new EXE
+    Copy-Item -Path "\$sourcePath\\\$exeName" -Destination "\$targetPath\\\$exeName" -Force -ErrorAction Stop
 
-REM Restart the app
-start "" "$targetPath\\$exeName"
+    # Copy all DLLs
+    Copy-Item -Path "\$sourcePath\\*.dll" -Destination "\$targetPath\\" -Force -ErrorAction SilentlyContinue
 
-REM Clean up (delete this script)
-timeout /t 1 /nobreak >nul
-del "%~f0"
+    # Remove old data folder and copy new one
+    if (Test-Path "\$targetPath\\data") {
+        Remove-Item -Path "\$targetPath\\data" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path "\$sourcePath\\data") {
+        Copy-Item -Path "\$sourcePath\\data" -Destination "\$targetPath\\data" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+} catch {
+    # Log error silently
+}
+
+# Wait a moment then restart the app
+Start-Sleep -Seconds 1
+Start-Process -FilePath "\$targetPath\\\$exeName" -WorkingDirectory "\$targetPath"
+
+# Clean up: delete this script
+Start-Sleep -Seconds 2
+Remove-Item -Path \$MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
 ''';
 
     // Write script to file
@@ -254,7 +269,8 @@ del "%~f0"
 
     debugPrint('❌ No Windows release found in assets');
     throw Exception(
-        'No Windows release found. Available assets: ${assets.map((a) => a['name']).join(', ')}');
+      'No Windows release found. Available assets: ${assets.map((a) => a['name']).join(', ')}',
+    );
   }
 }
 
