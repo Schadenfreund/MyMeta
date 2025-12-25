@@ -55,6 +55,10 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
   String _type = 'movie';
   Uint8List? _updatedCoverBytes; // Stores new cover when user changes it
   bool _pendingSave = false; // Prevents multiple simultaneous saves
+  bool _hasUnsavedChanges = false; // Tracks if there are unsaved field changes
+
+  // Store initial values to detect changes
+  late Map<String, String> _initialValues;
 
   @override
   void initState() {
@@ -86,16 +90,68 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
     // Smart type detection
     _type = _detectContentType(res);
 
-    // Add listeners to auto-save changes
-    _titleController.addListener(_saveChanges);
-    _yearController.addListener(_saveChanges);
-    _seasonController.addListener(_saveChanges);
-    _episodeController.addListener(_saveChanges);
-    _episodeTitleController.addListener(_saveChanges);
-    _descriptionController.addListener(_saveChanges);
-    _genresController.addListener(_saveChanges);
-    _directorController.addListener(_saveChanges);
-    _actorsController.addListener(_saveChanges);
+    // Store initial values for change detection
+    _storeInitialValues();
+
+    // Add listeners to detect changes (not auto-save)
+    _titleController.addListener(_onFieldChanged);
+    _yearController.addListener(_onFieldChanged);
+    _seasonController.addListener(_onFieldChanged);
+    _episodeController.addListener(_onFieldChanged);
+    _episodeTitleController.addListener(_onFieldChanged);
+    _descriptionController.addListener(_onFieldChanged);
+    _genresController.addListener(_onFieldChanged);
+    _directorController.addListener(_onFieldChanged);
+    _actorsController.addListener(_onFieldChanged);
+    _ratingController.addListener(_onFieldChanged);
+    _contentRatingController.addListener(_onFieldChanged);
+    _runtimeController.addListener(_onFieldChanged);
+  }
+
+  /// Stores current controller values as initial values for change detection
+  void _storeInitialValues() {
+    _initialValues = {
+      'title': _titleController.text,
+      'year': _yearController.text,
+      'season': _seasonController.text,
+      'episode': _episodeController.text,
+      'episodeTitle': _episodeTitleController.text,
+      'description': _descriptionController.text,
+      'genres': _genresController.text,
+      'director': _directorController.text,
+      'actors': _actorsController.text,
+      'rating': _ratingController.text,
+      'contentRating': _contentRatingController.text,
+      'runtime': _runtimeController.text,
+    };
+  }
+
+  /// Called when any field changes - updates unsaved state
+  void _onFieldChanged() {
+    if (!mounted) return;
+
+    final hasChanges = _checkForChanges();
+    if (hasChanges != _hasUnsavedChanges) {
+      setState(() {
+        _hasUnsavedChanges = hasChanges;
+      });
+    }
+  }
+
+  /// Checks if any field has changed from initial values
+  bool _checkForChanges() {
+    return _titleController.text != _initialValues['title'] ||
+        _yearController.text != _initialValues['year'] ||
+        _seasonController.text != _initialValues['season'] ||
+        _episodeController.text != _initialValues['episode'] ||
+        _episodeTitleController.text != _initialValues['episodeTitle'] ||
+        _descriptionController.text != _initialValues['description'] ||
+        _genresController.text != _initialValues['genres'] ||
+        _directorController.text != _initialValues['director'] ||
+        _actorsController.text != _initialValues['actors'] ||
+        _ratingController.text != _initialValues['rating'] ||
+        _contentRatingController.text != _initialValues['contentRating'] ||
+        _runtimeController.text != _initialValues['runtime'];
   }
 
   /// Saves current editor state to parent
@@ -165,6 +221,11 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
       if (mounted) {
         widget.onSave(result);
         _pendingSave = false; // Reset flag after save completes
+        // Update initial values and reset unsaved state
+        _storeInitialValues();
+        setState(() {
+          _hasUnsavedChanges = false;
+        });
       }
     });
   }
@@ -199,74 +260,90 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
     super.didUpdateWidget(oldWidget);
     if (widget.initialResult != oldWidget.initialResult) {
       final res = widget.initialResult;
-      final old = oldWidget.initialResult;
 
-      // Check if any significant field has changed from the parent
-      // This prevents save loops while still allowing external updates
-      bool hasSignificantChange = res.title != old.title ||
-          res.year != old.year ||
-          res.season != old.season ||
-          res.episode != old.episode ||
-          res.episodeTitle != old.episodeTitle ||
-          res.description != old.description ||
-          res.director != old.director ||
-          res.rating != old.rating ||
-          res.contentRating != old.contentRating ||
-          res.runtime != old.runtime ||
-          res.posterUrl != old.posterUrl ||
-          res.coverBytes != old.coverBytes ||
-          !_listEquals(res.genres, old.genres) ||
-          !_listEquals(res.actors, old.actors);
+      // Only update controllers if the incoming values are DIFFERENT from
+      // what the user currently has in the controllers. This prevents the
+      // parent's state update (from user's own save) from overwriting input.
+      bool incomingIsDifferent = (res.title ?? "") != _titleController.text ||
+          (res.year?.toString() ?? "") != _yearController.text ||
+          (res.season?.toString() ?? "") != _seasonController.text ||
+          (res.episode?.toString() ?? "") != _episodeController.text ||
+          (res.episodeTitle ?? "") != _episodeTitleController.text ||
+          (res.description ?? "") != _descriptionController.text ||
+          (res.genres?.join(', ') ?? "") != _genresController.text ||
+          (res.director ?? "") != _directorController.text ||
+          (res.actors?.join(', ') ?? "") != _actorsController.text ||
+          (res.rating?.toString() ?? "") != _ratingController.text ||
+          (res.contentRating ?? "") != _contentRatingController.text ||
+          (res.runtime?.toString() ?? "") != _runtimeController.text;
 
-      if (hasSignificantChange) {
+      // Also check for cover changes from external sources
+      bool hasCoverChange =
+          res.coverBytes != oldWidget.initialResult.coverBytes ||
+              res.posterUrl != oldWidget.initialResult.posterUrl;
+
+      if (incomingIsDifferent || hasCoverChange) {
         debugPrint(
-            "📥 InlineMetadataEditor: Received updated data from parent");
+            "📥 InlineMetadataEditor: Received updated data from parent (external change)");
 
-        // Temporarily remove listeners to prevent save loops during update
-        _titleController.removeListener(_saveChanges);
-        _yearController.removeListener(_saveChanges);
-        _seasonController.removeListener(_saveChanges);
-        _episodeController.removeListener(_saveChanges);
-        _episodeTitleController.removeListener(_saveChanges);
-        _descriptionController.removeListener(_saveChanges);
-        _genresController.removeListener(_saveChanges);
-        _directorController.removeListener(_saveChanges);
-        _actorsController.removeListener(_saveChanges);
+        // Temporarily remove listeners to prevent change detection during update
+        _titleController.removeListener(_onFieldChanged);
+        _yearController.removeListener(_onFieldChanged);
+        _seasonController.removeListener(_onFieldChanged);
+        _episodeController.removeListener(_onFieldChanged);
+        _episodeTitleController.removeListener(_onFieldChanged);
+        _descriptionController.removeListener(_onFieldChanged);
+        _genresController.removeListener(_onFieldChanged);
+        _directorController.removeListener(_onFieldChanged);
+        _actorsController.removeListener(_onFieldChanged);
+        _ratingController.removeListener(_onFieldChanged);
+        _contentRatingController.removeListener(_onFieldChanged);
+        _runtimeController.removeListener(_onFieldChanged);
 
-        // Update all controllers with new values
-        _nameController.text = res.newName;
-        _posterUrlController.text = res.posterUrl ?? "";
-        _titleController.text = res.title ?? "";
-        _yearController.text = res.year?.toString() ?? "";
-        _seasonController.text = res.season?.toString() ?? "";
-        _episodeController.text = res.episode?.toString() ?? "";
-        _episodeTitleController.text = res.episodeTitle ?? "";
-        _descriptionController.text = res.description ?? "";
-        _genresController.text = res.genres?.join(', ') ?? "";
-        _directorController.text = res.director ?? "";
-        _actorsController.text = res.actors?.join(', ') ?? "";
-        _ratingController.text = res.rating?.toString() ?? "";
-        _contentRatingController.text = res.contentRating ?? "";
-        _runtimeController.text = res.runtime?.toString() ?? "";
-
-        // Update cover bytes if provided
-        if (res.coverBytes != null) {
-          _updatedCoverBytes = res.coverBytes;
-        } else if (res.posterUrl != old.posterUrl) {
-          // Reset cover bytes so it uses new URL
-          _updatedCoverBytes = null;
+        // Only update controllers if incoming data is different
+        if (incomingIsDifferent) {
+          _nameController.text = res.newName;
+          _posterUrlController.text = res.posterUrl ?? "";
+          _titleController.text = res.title ?? "";
+          _yearController.text = res.year?.toString() ?? "";
+          _seasonController.text = res.season?.toString() ?? "";
+          _episodeController.text = res.episode?.toString() ?? "";
+          _episodeTitleController.text = res.episodeTitle ?? "";
+          _descriptionController.text = res.description ?? "";
+          _genresController.text = res.genres?.join(', ') ?? "";
+          _directorController.text = res.director ?? "";
+          _actorsController.text = res.actors?.join(', ') ?? "";
+          _ratingController.text = res.rating?.toString() ?? "";
+          _contentRatingController.text = res.contentRating ?? "";
+          _runtimeController.text = res.runtime?.toString() ?? "";
         }
 
+        // Update cover bytes if provided (external change like Fix Match)
+        if (hasCoverChange) {
+          if (res.coverBytes != null) {
+            _updatedCoverBytes = res.coverBytes;
+          } else if (res.posterUrl != oldWidget.initialResult.posterUrl) {
+            _updatedCoverBytes = null;
+          }
+        }
+
+        // Update initial values and reset unsaved state
+        _storeInitialValues();
+        _hasUnsavedChanges = false;
+
         // Re-add listeners
-        _titleController.addListener(_saveChanges);
-        _yearController.addListener(_saveChanges);
-        _seasonController.addListener(_saveChanges);
-        _episodeController.addListener(_saveChanges);
-        _episodeTitleController.addListener(_saveChanges);
-        _descriptionController.addListener(_saveChanges);
-        _genresController.addListener(_saveChanges);
-        _directorController.addListener(_saveChanges);
-        _actorsController.addListener(_saveChanges);
+        _titleController.addListener(_onFieldChanged);
+        _yearController.addListener(_onFieldChanged);
+        _seasonController.addListener(_onFieldChanged);
+        _episodeController.addListener(_onFieldChanged);
+        _episodeTitleController.addListener(_onFieldChanged);
+        _descriptionController.addListener(_onFieldChanged);
+        _genresController.addListener(_onFieldChanged);
+        _directorController.addListener(_onFieldChanged);
+        _actorsController.addListener(_onFieldChanged);
+        _ratingController.addListener(_onFieldChanged);
+        _contentRatingController.addListener(_onFieldChanged);
+        _runtimeController.addListener(_onFieldChanged);
 
         // Update type if needed
         if ((res.type == 'movie' || res.type == 'episode') &&
@@ -277,17 +354,6 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
         }
       }
     }
-  }
-
-  /// Helper to compare two lists for equality
-  bool _listEquals<T>(List<T>? a, List<T>? b) {
-    if (a == null && b == null) return true;
-    if (a == null || b == null) return false;
-    if (a.length != b.length) return false;
-    for (int i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
   }
 
   @override
@@ -706,10 +772,8 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
       contextData = {
         "series_name": metadata.title,
         "year": metadata.year,
-        "season_number":
-            metadata.season?.toString().padLeft(2, '0') ?? "00",
-        "episode_number":
-            metadata.episode?.toString().padLeft(2, '0') ?? "00",
+        "season_number": metadata.season?.toString().padLeft(2, '0') ?? "00",
+        "episode_number": metadata.episode?.toString().padLeft(2, '0') ?? "00",
         "episode_title": metadata.episodeTitle ?? "",
       };
     } else {
@@ -738,15 +802,18 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
   /// Applies metadata to all controllers without triggering save loops
   void _applyMetadataToControllers(MatchResult metadata) {
     // Temporarily remove all listeners
-    _titleController.removeListener(_saveChanges);
-    _yearController.removeListener(_saveChanges);
-    _seasonController.removeListener(_saveChanges);
-    _episodeController.removeListener(_saveChanges);
-    _episodeTitleController.removeListener(_saveChanges);
-    _descriptionController.removeListener(_saveChanges);
-    _genresController.removeListener(_saveChanges);
-    _directorController.removeListener(_saveChanges);
-    _actorsController.removeListener(_saveChanges);
+    _titleController.removeListener(_onFieldChanged);
+    _yearController.removeListener(_onFieldChanged);
+    _seasonController.removeListener(_onFieldChanged);
+    _episodeController.removeListener(_onFieldChanged);
+    _episodeTitleController.removeListener(_onFieldChanged);
+    _descriptionController.removeListener(_onFieldChanged);
+    _genresController.removeListener(_onFieldChanged);
+    _directorController.removeListener(_onFieldChanged);
+    _actorsController.removeListener(_onFieldChanged);
+    _ratingController.removeListener(_onFieldChanged);
+    _contentRatingController.removeListener(_onFieldChanged);
+    _runtimeController.removeListener(_onFieldChanged);
 
     // Update ALL controllers
     _nameController.text = metadata.newName;
@@ -767,6 +834,10 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
     // Update cover bytes
     _updatedCoverBytes = metadata.coverBytes;
 
+    // Update initial values and reset unsaved state
+    _storeInitialValues();
+    _hasUnsavedChanges = false;
+
     // Update type and trigger rebuild
     if (mounted) {
       setState(() {
@@ -775,15 +846,18 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
     }
 
     // Re-add all listeners
-    _titleController.addListener(_saveChanges);
-    _yearController.addListener(_saveChanges);
-    _seasonController.addListener(_saveChanges);
-    _episodeController.addListener(_saveChanges);
-    _episodeTitleController.addListener(_saveChanges);
-    _descriptionController.addListener(_saveChanges);
-    _genresController.addListener(_saveChanges);
-    _directorController.addListener(_saveChanges);
-    _actorsController.addListener(_saveChanges);
+    _titleController.addListener(_onFieldChanged);
+    _yearController.addListener(_onFieldChanged);
+    _seasonController.addListener(_onFieldChanged);
+    _episodeController.addListener(_onFieldChanged);
+    _episodeTitleController.addListener(_onFieldChanged);
+    _descriptionController.addListener(_onFieldChanged);
+    _genresController.addListener(_onFieldChanged);
+    _directorController.addListener(_onFieldChanged);
+    _actorsController.addListener(_onFieldChanged);
+    _ratingController.addListener(_onFieldChanged);
+    _contentRatingController.addListener(_onFieldChanged);
+    _runtimeController.addListener(_onFieldChanged);
   }
 
   /// Build no cover placeholder
@@ -828,6 +902,30 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
                 ),
               ),
               const Spacer(),
+              // Apply Changes Button (only visible when there are unsaved changes)
+              if (_hasUnsavedChanges)
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: TextButton.icon(
+                    onPressed: _saveChanges,
+                    icon: Icon(Icons.check,
+                        size: 18, color: Colors.green.shade400),
+                    label: Text(
+                      "Apply",
+                      style: TextStyle(color: Colors.green.shade400),
+                    ),
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.green.withOpacity(0.1),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        side:
+                            BorderSide(color: Colors.green.shade400, width: 1),
+                      ),
+                    ),
+                  ),
+                ),
               // Type Selector
               Container(
                 padding: const EdgeInsets.all(4),
