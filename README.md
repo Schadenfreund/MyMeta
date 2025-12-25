@@ -1,6 +1,6 @@
 # MyMeta
 
-**Professional Media File Metadata Manager**
+**Media File Metadata Manager**
 
 MyMeta is a user-friendly desktop application for automatically fetching, editing, and embedding metadata into your media files. Say goodbye to manual file organization and inconsistent naming!
 
