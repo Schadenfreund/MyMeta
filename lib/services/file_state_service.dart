@@ -100,6 +100,7 @@ class FileStateService with ChangeNotifier {
   Future<void> matchSingleFile(
     int index,
     SettingsService settings, {
+    String? overrideTitle,
     int? overrideSeason,
     int? overrideEpisode,
   }) async {
@@ -122,14 +123,15 @@ class FileStateService with ChangeNotifier {
       // Get the original file
       final originalFile = _inputFiles[index];
 
-      // Create a MediaRecord with overridden season/episode if provided
+      // Create a MediaRecord with overridden title/season/episode if provided
       final MediaRecord fileToMatch;
-      if (overrideSeason != null || overrideEpisode != null) {
+      if (overrideTitle != null || overrideSeason != null || overrideEpisode != null) {
         debugPrint(
-            '🔄 Using overridden season/episode for search: S${overrideSeason ?? originalFile.season}E${overrideEpisode ?? originalFile.episode}');
+            '🔄 Using overridden values for search: Title="${overrideTitle ?? originalFile.title}" S${overrideSeason ?? originalFile.season}E${overrideEpisode ?? originalFile.episode}');
         // Create a copy with overridden values
         fileToMatch = MediaRecord.withOverrides(
           originalFile.fullFilePath,
+          title: overrideTitle,
           season: overrideSeason,
           episode: overrideEpisode,
         );

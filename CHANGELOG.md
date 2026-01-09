@@ -5,6 +5,17 @@ All notable changes to MyMeta will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-01-09
+
+### Added
+- **Pre-Search Confirmation Modal** - When using "Search All Metadata", a modal now appears asking you to confirm or correct the TV Show/Movie name before searching. This prevents wrong matches and ensures accurate bulk metadata fetching.
+- **Title Override Support** - All metadata search operations now support overriding the detected title, allowing for more accurate searches when filename parsing doesn't capture the correct name.
+- **Smart Title Guessing** - The confirmation modal pre-fills with an intelligent guess based on the first file's name, stripping common patterns like season/episode markers, years, and quality indicators.
+
+### Changed
+- **Search All Metadata Workflow** - The bulk search feature now requires user confirmation of the series/movie name before proceeding, improving match accuracy.
+- **MediaRecord Enhancement** - Added title override capability to the `MediaRecord.withOverrides` constructor for more flexible metadata searching.
+
 ## [1.0.3] - 2025-12-24
 
 - **Auto-Update Feature** - Added "Software Updates" card in Settings that checks GitHub Releases for new versions

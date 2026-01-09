@@ -6,7 +6,8 @@
       "Bash(cmd /c \"flutter build windows --release 2>&1 | more\")",
       "Bash(flutter.bat build:*)",
       "Bash(cmd /c:*)",
-      "Bash(flutter.bat analyze:*)"
+      "Bash(flutter.bat analyze:*)",
+      "Bash(powershell:*)"
     ]
   }
 }

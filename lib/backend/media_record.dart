@@ -13,17 +13,18 @@ class MediaRecord {
     _analyze();
   }
 
-  // Constructor with season/episode overrides for search
+  // Constructor with title/season/episode overrides for search
   MediaRecord.withOverrides(
     this.fullFilePath, {
+    String? title,
     int? season,
     int? episode,
   }) : fileName = p.basename(fullFilePath) {
     _analyze();
     // Override specific fields after parsing
-    if (season != null || episode != null) {
+    if (title != null || season != null || episode != null) {
       metadata = ParsedMetadata(
-        title: metadata.title,
+        title: title ?? metadata.title,
         year: metadata.year,
         season: season ?? metadata.season,
         episode: episode ?? metadata.episode,

@@ -243,7 +243,13 @@ class _RenamerPageState extends State<RenamerPage> {
                         return;
                       }
 
-                      // No validation - matchSingleFile will auto-select available API
+                      // Show confirmation modal before searching
+                      final confirmedTitle = await _showSearchAllConfirmationModal(context, settings);
+
+                      if (confirmedTitle == null) {
+                        // User cancelled
+                        return;
+                      }
 
                       setState(() => _expandedIndex = null);
 
@@ -256,7 +262,7 @@ class _RenamerPageState extends State<RenamerPage> {
                       int foundCount = 0;
                       for (int i = 0; i < fileState.inputFiles.length; i++) {
                         if (!fileState.inputFiles[i].isRenamed) {
-                          await fileState.matchSingleFile(i, settings);
+                          await fileState.matchSingleFile(i, settings, overrideTitle: confirmedTitle);
 
                           // Check if metadata was found
                           if (i < fileState.matchResults.length) {
@@ -1152,5 +1158,139 @@ class _RenamerPageState extends State<RenamerPage> {
 
     // Update the match in file state
     fileState.updateManualMatch(index, completeResult);
+  }
+
+  /// Shows a confirmation modal before bulk searching all metadata
+  Future<String?> _showSearchAllConfirmationModal(
+    BuildContext context,
+    SettingsService settings,
+  ) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textController = TextEditingController();
+
+    // Pre-fill with a guess from the first file
+    final fileState = context.read<FileStateService>();
+    if (fileState.inputFiles.isNotEmpty) {
+      final firstFile = fileState.inputFiles[0];
+      // Try to extract a clean title from the filename
+      String guess = firstFile.fileName;
+
+      // Remove file extension
+      if (guess.contains('.')) {
+        guess = guess.substring(0, guess.lastIndexOf('.'));
+      }
+
+      // Remove common patterns (season/episode markers, year, quality markers)
+      guess = guess
+          .replaceAll(RegExp(r'[Ss]\d{1,2}[Ee]\d{1,2}'), '')
+          .replaceAll(RegExp(r'\d{4}'), '')
+          .replaceAll(RegExp(r'[\[\(].*?[\]\)]'), '')
+          .replaceAll(RegExp(r'[_\.]'), ' ')
+          .trim();
+
+      textController.text = guess;
+    }
+
+    return showDialog<String>(
+      context: context,
+      builder: (context) => Dialog(
+        child: Container(
+          width: 600,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                children: [
+                  Icon(
+                    Icons.search,
+                    color: settings.accentColor,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Confirm Series/Movie Name',
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Subtitle
+              Text(
+                'Enter the correct TV Show or Movie name to ensure accurate matches:',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 24),
+
+              // Text field
+              TextField(
+                controller: textController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'TV Show or Movie Name',
+                  hintText: 'e.g., Breaking Bad, The Matrix',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: settings.accentColor,
+                      width: 2,
+                    ),
+                  ),
+                  prefixIcon: const Icon(Icons.movie),
+                ),
+                onSubmitted: (value) {
+                  if (value.trim().isNotEmpty) {
+                    Navigator.pop(context, value.trim());
+                  }
+                },
+              ),
+              const SizedBox(height: 24),
+
+              // Buttons
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      final value = textController.text.trim();
+                      if (value.isNotEmpty) {
+                        Navigator.pop(context, value);
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: settings.accentColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
+                    ),
+                    icon: const Icon(Icons.search),
+                    label: const Text('Search'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

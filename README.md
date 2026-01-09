@@ -4,7 +4,7 @@
 
 MyMeta is a user-friendly desktop application for automatically fetching, editing, and embedding metadata into your media files. Say goodbye to manual file organization and inconsistent naming!
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.5-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -25,7 +25,8 @@ MyMeta is a user-friendly desktop application for automatically fetching, editin
 ### **File Renaming**
 - Customizable naming templates for movies and TV shows
 - Smart filename parsing for better matching
-- Batch processing support
+- Batch processing with title confirmation modal
+- Prevents wrong matches during bulk operations
 
 ### **Rich Metadata Embedding**
 - Embedded metadata includes:
@@ -221,7 +222,13 @@ Yes! All processing happens locally. Only metadata queries go to TMDB/OMDb APIs.
 
 ## 📝 Changelog
 
-### **Version 1.0.0** - Current (Initial Public Release)
+### **Version 1.0.5** - Current
+- Pre-search confirmation modal for bulk metadata searches
+- Title override support for more accurate matching
+- Smart title guessing from filenames
+- Improved bulk search workflow
+
+### **Version 1.0.0** - Initial Public Release
 - Zero lint issues - production-ready code quality
 - TMDB, OMDb & AniDB metadata integration
 - One-click tool setup (FFmpeg, MKVToolNix, AtomicParsley)
