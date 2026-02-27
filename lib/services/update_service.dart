@@ -25,12 +25,7 @@ class UpdateService {
       debugPrint('🔍 Checking for updates (current: v$currentVersion)');
 
       // Fetch latest release from GitHub API
-      final dio = Dio(
-        BaseOptions(
-          connectTimeout: const Duration(seconds: 15),
-          receiveTimeout: const Duration(seconds: 30),
-        ),
-      );
+      final dio = _createDio();
       final response = await dio.get(
         'https://api.github.com/repos/$repoOwner/$repoName/releases/latest',
       );
@@ -72,12 +67,7 @@ class UpdateService {
     try {
       onProgress(0.0, 'Preparing download...');
 
-      final dio = Dio(
-        BaseOptions(
-          connectTimeout: const Duration(seconds: 15),
-          receiveTimeout: const Duration(minutes: 5),
-        ),
-      );
+      final dio = _createDio(receiveTimeout: const Duration(minutes: 5));
       final tempDir = await Directory.systemTemp.createTemp('mymeta_update_');
       final zipPath = p.join(tempDir.path, 'update.zip');
 
@@ -136,6 +126,7 @@ class UpdateService {
         extractPath,
         currentDir,
         p.basename(exePath),
+        tempDir.path,
       );
 
       onProgress(0.9, 'Update ready!');
@@ -152,26 +143,24 @@ class UpdateService {
     }
   }
 
-  /// Create a PowerShell script that will perform the update silently after the app closes
+  /// Create a PowerShell script that will perform the update silently after the app closes.
+  /// [scriptDir] should be the temp directory so the script is always writable.
   Future<String> _createUpdateScript(
     String sourcePath,
     String targetPath,
     String exeName,
+    String scriptDir,
   ) async {
-    final scriptPath = p.join(targetPath, 'update_mymeta.ps1');
+    final scriptPath = p.join(scriptDir, 'update_mymeta.ps1');
 
-    // Escape backslashes for PowerShell
-    final sourcePathEscaped = sourcePath.replaceAll('\\', '\\\\');
-    final targetPathEscaped = targetPath.replaceAll('\\', '\\\\');
-
-    // Create PowerShell script content (runs silently)
-    final script =
-        '''
+    // PowerShell single-quoted strings are fully literal — backslash has no special meaning,
+    // so Windows paths can be embedded directly without any escaping.
+    final script = '''
 # MyMeta Auto-Update Script (Silent)
 \$ErrorActionPreference = "SilentlyContinue"
 
 # Wait for MyMeta to close
-\$exeName = "$exeName"
+\$exeName = '$exeName'
 \$processName = \$exeName -replace '\\.exe\$', ''
 
 Start-Sleep -Seconds 2
@@ -181,44 +170,40 @@ while (Get-Process -Name \$processName -ErrorAction SilentlyContinue) {
 }
 
 # Source and target paths
-\$sourcePath = "$sourcePathEscaped"
-\$targetPath = "$targetPathEscaped"
+\$sourcePath = '$sourcePath'
+\$targetPath = '$targetPath'
 
 # Perform update (copy files silently)
 try {
-    # Copy new EXE
     Copy-Item -Path "\$sourcePath\\\$exeName" -Destination "\$targetPath\\\$exeName" -Force -ErrorAction Stop
-
-    # Copy all DLLs
     Copy-Item -Path "\$sourcePath\\*.dll" -Destination "\$targetPath\\" -Force -ErrorAction SilentlyContinue
-
-    # Remove old data folder and copy new one
     if (Test-Path "\$targetPath\\data") {
         Remove-Item -Path "\$targetPath\\data" -Recurse -Force -ErrorAction SilentlyContinue
     }
     if (Test-Path "\$sourcePath\\data") {
         Copy-Item -Path "\$sourcePath\\data" -Destination "\$targetPath\\data" -Recurse -Force -ErrorAction SilentlyContinue
     }
-} catch {
-    # Log error silently
-}
+} catch {}
 
-# Wait a moment then restart the app
 Start-Sleep -Seconds 1
 Start-Process -FilePath "\$targetPath\\\$exeName" -WorkingDirectory "\$targetPath"
 
-# Clean up: delete this script
 Start-Sleep -Seconds 2
 Remove-Item -Path \$MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
 ''';
 
-    // Write script to file
-    final scriptFile = File(scriptPath);
-    await scriptFile.writeAsString(script);
-
+    await File(scriptPath).writeAsString(script);
     debugPrint('📜 Update script created at: $scriptPath');
     return scriptPath;
   }
+
+  /// Create a Dio instance with standard connection timeout
+  Dio _createDio({Duration? receiveTimeout}) => Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: receiveTimeout ?? const Duration(seconds: 30),
+    ),
+  );
 
   /// Compare version strings (semantic versioning)
   /// Handles version strings with suffixes like "1.0.2-release" or "1.0.2-beta"

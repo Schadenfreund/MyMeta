@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/update_service.dart';
@@ -75,11 +76,19 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
             ),
             const SizedBox(height: 8),
             Container(
-              constraints: const BoxConstraints(maxHeight: 200),
+              constraints: const BoxConstraints(maxHeight: 300),
               child: SingleChildScrollView(
-                child: Text(
-                  updateInfo.releaseNotes,
-                  style: Theme.of(context).textTheme.bodySmall,
+                child: MarkdownBody(
+                  data: updateInfo.releaseNotes,
+                  styleSheet: MarkdownStyleSheet.fromTheme(
+                    Theme.of(context),
+                  ).copyWith(
+                    p: Theme.of(context).textTheme.bodySmall,
+                    h3: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                    listBullet: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ),
               ),
             ),
@@ -217,6 +226,7 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
   String _status = 'Initializing...';
   bool _completed = false;
   bool _error = false;
+  String? _launchError;
   UpdateService? _updateService;
 
   @override
@@ -249,19 +259,26 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
   }
 
   Future<void> _executeUpdateAndExit() async {
-    if (_updateService?.updateScriptPath != null) {
-      // Execute the PowerShell script silently (no visible windows)
-      await Process.start('powershell.exe', [
-        '-ExecutionPolicy',
-        'Bypass',
-        '-WindowStyle',
-        'Hidden',
-        '-File',
-        _updateService!.updateScriptPath!,
-      ], mode: ProcessStartMode.detached);
+    final scriptPath = _updateService?.updateScriptPath;
+    if (scriptPath == null) {
+      if (mounted) {
+        setState(() => _launchError = 'Update script not found. Please try again.');
+      }
+      return;
+    }
 
-      // Exit the app - the PowerShell script will handle the rest
+    try {
+      await Process.start(
+        'powershell.exe',
+        ['-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath],
+        mode: ProcessStartMode.detached,
+      );
       exit(0);
+    } catch (e) {
+      debugPrint('❌ Failed to launch update script: $e');
+      if (mounted) {
+        setState(() => _launchError = 'Could not start installer. Download manually from GitHub.');
+      }
     }
   }
 
@@ -298,6 +315,14 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
               'Update downloaded successfully! Click "Restart Now" to complete the installation.',
               textAlign: TextAlign.center,
             ),
+            if (_launchError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _launchError!,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.red),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ],
         ],
       ),
@@ -305,13 +330,22 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
         if (_completed && !_error) ...[
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Restart Later'),
+            child: Text(_launchError != null ? 'Close' : 'Restart Later'),
           ),
-          FilledButton.icon(
-            onPressed: _executeUpdateAndExit,
-            icon: const Icon(Icons.restart_alt),
-            label: const Text('Restart Now'),
-          ),
+          if (_launchError != null)
+            FilledButton.icon(
+              onPressed: () => launchUrl(Uri.parse(
+                'https://github.com/${UpdateService.repoOwner}/${UpdateService.repoName}/releases/latest',
+              )),
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Open GitHub'),
+            )
+          else
+            FilledButton.icon(
+              onPressed: _executeUpdateAndExit,
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Restart Now'),
+            ),
         ] else if (_completed && _error) ...[
           FilledButton(
             onPressed: () => Navigator.pop(context),

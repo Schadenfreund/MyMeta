@@ -5,21 +5,7 @@ All notable changes to MyMeta will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.6] - 2026-02-27
-
-### Added
-
-- **Video Track Name & File Title Tag** - Automatically sets the container title and video track name when embedding metadata into all supported video formats:
-  - **MKV**: Sets `info.title` and `track:v1.name` via mkvpropedit (zero extra process invocations)
-  - **MP4 via FFmpeg**: Sets container title and video stream title via `-metadata` and `-metadata:s:v:0`
-  - **MP4 via AtomicParsley**: Sets `--title` to the formatted container title
-  - Format: `"Show S01E01: Episode Title"` for TV episodes, `"Movie Title (Year)"` for movies
-- **Season Poster Support** - New toggle in Settings to use season-specific posters instead of show posters for TV episodes, providing more accurate artwork per season
-
-### Fixed
-
-- **Bulk Search Metadata Mismatch** - "Search All Metadata" now correctly fetches individual metadata for each file. Previously, all files would receive the metadata of the first matched file. Each file now gets its own confirmation dialog pre-filled with its parsed title that can be updated.
-- **Colon in Filenames** - Colons (`:`) in titles (e.g. "Batman: Begins") are now converted to ` - ` instead of being silently removed, preserving the intended meaning in renamed filenames
+f
 
 ## [1.0.5] - 2026-01-09
 

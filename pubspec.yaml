@@ -1,7 +1,7 @@
 name: mymeta
 description: MyMeta - Media file metadata manager and renamer
 publish_to: 'none'
-version: 1.0.6
+version: 1.0.7
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -24,6 +24,7 @@ dependencies:
   path_provider: ^2.1.0
   archive: ^3.4.0         # For ZIP extraction during updates
   dio: ^5.4.0             # For downloads with progress
+  flutter_markdown: ^0.7.0 # For rendering markdown in update dialog
 
 dev_dependencies:
   flutter_test:
