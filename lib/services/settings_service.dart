@@ -11,6 +11,7 @@ class SettingsService with ChangeNotifier {
   String _movieFormat = "{movie_name}";
   List<String> _excludedFolders = [];
   bool _filenameAnalysisOnly = false;
+  bool _useSeasonPoster = false;
   String _tmdbApiKey = "";
   String _omdbApiKey = "";
   String _anidbClientId = "";
@@ -43,6 +44,7 @@ class SettingsService with ChangeNotifier {
   String get movieFormat => _movieFormat;
   List<String> get excludedFolders => _excludedFolders;
   bool get filenameAnalysisOnly => _filenameAnalysisOnly;
+  bool get useSeasonPoster => _useSeasonPoster;
   String get tmdbApiKey => _tmdbApiKey;
   String get omdbApiKey => _omdbApiKey;
   String get anidbClientId => _anidbClientId;
@@ -117,6 +119,7 @@ class SettingsService with ChangeNotifier {
 
       // Filename Analysis Only
       _filenameAnalysisOnly = data['filename_analysis_only'] ?? false;
+      _useSeasonPoster = data['use_season_poster'] ?? false;
 
       // API Keys
       _tmdbApiKey = data['tmdb_api_key'] ?? "";
@@ -326,6 +329,7 @@ class SettingsService with ChangeNotifier {
         'movie_format': _movieFormat,
         'excluded_folders': _excludedFolders,
         'filename_analysis_only': _filenameAnalysisOnly,
+        'use_season_poster': _useSeasonPoster,
         'tmdb_api_key': _tmdbApiKey,
         'omdb_api_key': _omdbApiKey,
         'anidb_client_id': _anidbClientId,
@@ -385,6 +389,12 @@ class SettingsService with ChangeNotifier {
 
   Future<void> setFilenameAnalysisOnly(bool value) async {
     _filenameAnalysisOnly = value;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> setUseSeasonPoster(bool value) async {
+    _useSeasonPoster = value;
     await _saveSettings();
     notifyListeners();
   }
@@ -465,6 +475,7 @@ class SettingsService with ChangeNotifier {
     _movieFormat = "{movie_name}";
     _excludedFolders = [];
     _filenameAnalysisOnly = false;
+    _useSeasonPoster = false;
     _tmdbApiKey = "";
     _omdbApiKey = "";
     _anidbClientId = "";

@@ -147,6 +147,18 @@ class TmdbService {
     return lookup;
   }
 
+  /// Fetch the poster URL for a specific season.
+  /// Returns null if the season has no poster (caller should fall back to show poster).
+  Future<String?> getSeasonPosterUrl(int tvId, int season) async {
+    final uri =
+        Uri.parse('$_baseUrl/tv/$tvId/season/$season?api_key=$apiKey');
+    final data = await ApiClient.getJson(uri);
+    if (data == null) return null;
+    final posterPath = data['poster_path'];
+    if (posterPath == null) return null;
+    return '${ImageConfig.tmdbImageBaseUrl}${ImageConfig.tmdbPosterSize}$posterPath';
+  }
+
   /// Get specific episode details including description
   Future<Map<String, dynamic>?> getEpisodeDetails(
     int seriesId,

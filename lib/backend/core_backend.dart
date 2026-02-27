@@ -25,6 +25,23 @@ class CoreBackend {
     return result;
   }
 
+  /// Builds the formatted container title string used for the file title tag
+  /// and video track name embedded into media files.
+  /// Movies:   "Title (Year)"             e.g. Inception (2010)
+  /// TV shows: "Show S##E##: Episode"     e.g. Breaking Bad S01E05: Gray Matter
+  static String _buildContainerTitle(MatchResult metadata) {
+    if (metadata.season != null && metadata.episode != null) {
+      final s = metadata.season!.toString().padLeft(2, '0');
+      final e = metadata.episode!.toString().padLeft(2, '0');
+      final base = '${metadata.title ?? ''} S${s}E${e}';
+      final ep = metadata.episodeTitle;
+      return (ep != null && ep.isNotEmpty) ? '$base: $ep' : base;
+    }
+    final title = metadata.title ?? '';
+    final year = metadata.year;
+    return year != null ? '$title ($year)' : title;
+  }
+
   /// Centralized metadata search method
   /// Searches for movies or TV shows and returns results with full metadata
   /// For TV shows, preserves season/episode/episodeTitle from the original file
@@ -39,6 +56,7 @@ class CoreBackend {
     String? episodeTitle, // For TV shows - preserved from original file
     bool fetchAllEpisodes =
         false, // If true, fetches all episode details (no rate limit)
+    bool useSeasonPoster = false, // TMDB only: prefer season poster over show poster
   }) async {
     // Validation: Ensure required parameters are valid
     if (apiKey.trim().isEmpty) {
@@ -169,6 +187,16 @@ class CoreBackend {
 
                 // Fetch alternative posters
                 alternativePosters = await tmdb.getTVPosters(tvId);
+
+                // Override with season-specific poster when enabled
+                if (useSeasonPoster && season != null) {
+                  final seasonPoster =
+                      await tmdb.getSeasonPosterUrl(tvId, season);
+                  if (seasonPoster != null) {
+                    posterUrl = seasonPoster;
+                    debugPrint('🖼️  Using season $season poster for $tvId');
+                  }
+                }
 
                 // Fetch specific episode title and description if season/episode provided
                 if (season != null && episode != null) {
@@ -575,6 +603,7 @@ class CoreBackend {
     String? omdbApiKey,
     String? anidbClientId,
     String metadataSource = 'tmdb',
+    bool useSeasonPoster = false,
   }) async {
     List<MatchResult> results = [];
 
@@ -645,6 +674,7 @@ class CoreBackend {
           season: record.season,
           episode: record.episode,
           episodeTitle: null, // Will be fetched for the matched show
+          useSeasonPoster: useSeasonPoster,
         );
 
         if (searchResults.isEmpty) {
@@ -1421,6 +1451,7 @@ class CoreBackend {
     try {
       bool hasAttachment = false;
       bool hasTags = false;
+      final containerTitle = _buildContainerTitle(metadata);
 
       // Step 1: Attach cover (delete existing covers first to prevent duplicates!)
       if (coverPath != null && File(coverPath).existsSync()) {
@@ -1524,6 +1555,9 @@ class CoreBackend {
               filePath,
               '--tags',
               'all:$xmlPath',
+              // Set segment info title and video track name in the same pass
+              if (containerTitle.isNotEmpty) ...['--edit', 'info', '--set', 'title=$containerTitle'],
+              if (containerTitle.isNotEmpty) ...['--edit', 'track:v1', '--set', 'name=$containerTitle'],
             ],
             runInShell: false);
         try {
@@ -1564,8 +1598,9 @@ class CoreBackend {
     List<String> args = [filePath];
 
     // Map metadata fields to AtomicParsley arguments
-    if (metadata.title != null && metadata.title!.isNotEmpty) {
-      args.addAll(['--title', metadata.title!]);
+    final containerTitle = _buildContainerTitle(metadata);
+    if (containerTitle.isNotEmpty) {
+      args.addAll(['--title', containerTitle]);
     }
 
     if (metadata.year != null) {
@@ -1821,8 +1856,14 @@ class CoreBackend {
       }
     }
 
-    // Basic Info
-    addMeta('title', metadata.title);
+    // Basic Info — use the formatted container title for both the file title tag
+    // and the video stream title so media players display it correctly.
+    final containerTitle = _buildContainerTitle(metadata);
+    addMeta('title', containerTitle);
+    if (containerTitle.isNotEmpty) {
+      args.addAll(['-metadata:s:v:0', 'title=${_escapeMetadata(containerTitle)}']);
+      metaCount++;
+    }
     if (metadata.year != null) {
       addMeta('year', metadata.year.toString());
       addMeta('date', metadata.year.toString());

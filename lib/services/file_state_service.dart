@@ -25,12 +25,12 @@ class FileStateService with ChangeNotifier {
   bool get isAddingFiles => _isAddingFiles;
   bool get canUndo => _canUndo;
 
-  /// Sanitize filename by removing invalid Windows characters
+  /// Sanitize filename by removing/replacing invalid Windows characters
   String _sanitizeFilename(String filename) {
-    // Characters not allowed in Windows filenames: \ / : * ? " < > |
     return filename
-        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '')
-        .replaceAll(RegExp(r'\s+'), ' ') // Collapse multiple spaces
+        .replaceAll(':', ' - ')                  // Replace colon with space-dash-space
+        .replaceAll(RegExp(r'[\\/*?"<>|]'), '')  // Remove remaining invalid Windows chars
+        .replaceAll(RegExp(r'\s+'), ' ')          // Collapse multiple spaces
         .trim();
   }
 
@@ -81,6 +81,7 @@ class FileStateService with ChangeNotifier {
         omdbApiKey: settings.omdbApiKey,
         anidbClientId: settings.anidbClientId,
         metadataSource: settings.metadataSource,
+        useSeasonPoster: settings.useSeasonPoster,
       );
 
       _matchResults.clear();
@@ -148,6 +149,7 @@ class FileStateService with ChangeNotifier {
         omdbApiKey: settings.omdbApiKey,
         anidbClientId: settings.anidbClientId,
         metadataSource: settings.metadataSource,
+        useSeasonPoster: settings.useSeasonPoster,
       );
 
       if (results.isNotEmpty) {

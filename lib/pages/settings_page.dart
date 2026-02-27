@@ -176,6 +176,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   onChanged: settings.setAnidbClientId,
                 ),
               ),
+              const SizedBox(height: AppSpacing.md),
+              AppSettingRow(
+                title: 'Season Poster',
+                description: 'Use season-specific poster for TV episodes (TMDB only). Falls back to show poster if unavailable.',
+                control: Switch(
+                  value: settings.useSeasonPoster,
+                  onChanged: settings.setUseSeasonPoster,
+                  activeColor: settings.accentColor,
+                ),
+              ),
             ],
           ),
 

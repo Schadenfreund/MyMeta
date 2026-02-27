@@ -244,9 +244,9 @@ class _RenamerPageState extends State<RenamerPage> {
                       }
 
                       // Show confirmation modal before searching
-                      final confirmedTitle = await _showSearchAllConfirmationModal(context, settings);
+                      final confirmedTitles = await _showSearchAllConfirmationModal(context, settings);
 
-                      if (confirmedTitle == null) {
+                      if (confirmedTitles == null) {
                         // User cancelled
                         return;
                       }
@@ -258,11 +258,20 @@ class _RenamerPageState extends State<RenamerPage> {
                         'Searching metadata for all files...',
                       );
 
-                      // Search metadata for all files
+                      // Search each file using its (possibly user-edited) title
                       int foundCount = 0;
+                      int unmatchedIdx = 0;
                       for (int i = 0; i < fileState.inputFiles.length; i++) {
                         if (!fileState.inputFiles[i].isRenamed) {
-                          await fileState.matchSingleFile(i, settings, overrideTitle: confirmedTitle);
+                          final override = unmatchedIdx < confirmedTitles.length
+                              ? confirmedTitles[unmatchedIdx].trim()
+                              : null;
+                          unmatchedIdx++;
+                          await fileState.matchSingleFile(
+                            i,
+                            settings,
+                            overrideTitle: (override != null && override.isNotEmpty) ? override : null,
+                          );
 
                           // Check if metadata was found
                           if (i < fileState.matchResults.length) {
@@ -1160,42 +1169,26 @@ class _RenamerPageState extends State<RenamerPage> {
     fileState.updateManualMatch(index, completeResult);
   }
 
-  /// Shows a confirmation modal before bulk searching all metadata
-  Future<String?> _showSearchAllConfirmationModal(
+  /// Shows a confirmation modal before bulk searching all metadata.
+  /// Returns a list of (possibly user-edited) search titles — one per unmatched
+  /// file — or null if the user cancelled.
+  Future<List<String>?> _showSearchAllConfirmationModal(
     BuildContext context,
     SettingsService settings,
   ) async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textController = TextEditingController();
-
-    // Pre-fill with a guess from the first file
     final fileState = context.read<FileStateService>();
-    if (fileState.inputFiles.isNotEmpty) {
-      final firstFile = fileState.inputFiles[0];
-      // Try to extract a clean title from the filename
-      String guess = firstFile.fileName;
+    final unmatched = fileState.inputFiles.where((f) => !f.isRenamed).toList();
 
-      // Remove file extension
-      if (guess.contains('.')) {
-        guess = guess.substring(0, guess.lastIndexOf('.'));
-      }
+    // Pre-fill one controller per file with its parsed title
+    final controllers = unmatched
+        .map((r) => TextEditingController(text: r.title ?? r.fileName))
+        .toList();
 
-      // Remove common patterns (season/episode markers, year, quality markers)
-      guess = guess
-          .replaceAll(RegExp(r'[Ss]\d{1,2}[Ee]\d{1,2}'), '')
-          .replaceAll(RegExp(r'\d{4}'), '')
-          .replaceAll(RegExp(r'[\[\(].*?[\]\)]'), '')
-          .replaceAll(RegExp(r'[_\.]'), ' ')
-          .trim();
-
-      textController.text = guess;
-    }
-
-    return showDialog<String>(
+    final result = await showDialog<List<String>>(
       context: context,
       builder: (context) => Dialog(
         child: Container(
-          width: 600,
+          width: 520,
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1204,15 +1197,11 @@ class _RenamerPageState extends State<RenamerPage> {
               // Header
               Row(
                 children: [
-                  Icon(
-                    Icons.search,
-                    color: settings.accentColor,
-                    size: 28,
-                  ),
+                  Icon(Icons.cloud_download_outlined, color: settings.accentColor, size: 28),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Confirm Series/Movie Name',
+                      'Search All Metadata',
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                   ),
@@ -1222,41 +1211,68 @@ class _RenamerPageState extends State<RenamerPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-
-              // Subtitle
+              const SizedBox(height: 12),
               Text(
-                'Enter the correct TV Show or Movie name to ensure accurate matches:',
+                'Edit any title before searching. Each file is searched independently.',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
 
-              // Text field
-              TextField(
-                controller: textController,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: 'TV Show or Movie Name',
-                  hintText: 'e.g., Breaking Bad, The Matrix',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: settings.accentColor,
-                      width: 2,
-                    ),
-                  ),
-                  prefixIcon: const Icon(Icons.movie),
+              // Editable file list
+              if (unmatched.isNotEmpty) ...[
+                Text(
+                  '${unmatched.length} file${unmatched.length > 1 ? 's' : ''} to search:',
+                  style: Theme.of(context).textTheme.labelLarge,
                 ),
-                onSubmitted: (value) {
-                  if (value.trim().isNotEmpty) {
-                    Navigator.pop(context, value.trim());
-                  }
-                },
-              ),
-              const SizedBox(height: 24),
+                const SizedBox(height: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 240),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: unmatched.length,
+                    itemBuilder: (context, i) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.movie_outlined,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.onSurface.withAlpha(100),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: controllers[i],
+                                style: Theme.of(context).textTheme.bodySmall,
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                  hintText: unmatched[i].fileName,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(6),
+                                    borderSide: BorderSide(
+                                      color: settings.accentColor,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
 
               // Buttons
               Row(
@@ -1268,22 +1284,17 @@ class _RenamerPageState extends State<RenamerPage> {
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton.icon(
-                    onPressed: () {
-                      final value = textController.text.trim();
-                      if (value.isNotEmpty) {
-                        Navigator.pop(context, value);
-                      }
-                    },
+                    onPressed: () => Navigator.pop(
+                      context,
+                      controllers.map((c) => c.text).toList(),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: settings.accentColor,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                     ),
                     icon: const Icon(Icons.search),
-                    label: const Text('Search'),
+                    label: const Text('Search All'),
                   ),
                 ],
               ),
@@ -1292,5 +1303,10 @@ class _RenamerPageState extends State<RenamerPage> {
         ),
       ),
     );
+
+    for (final c in controllers) {
+      c.dispose();
+    }
+    return result;
   }
 }
