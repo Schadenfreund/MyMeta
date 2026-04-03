@@ -4,7 +4,7 @@
 
 MyMeta is a user-friendly desktop application for automatically fetching, editing, and embedding metadata into your media files. Say goodbye to manual file organization and inconsistent naming!
 
-![Version](https://img.shields.io/badge/version-1.0.7-blue)
+![Version](https://img.shields.io/badge/version-1.0.8-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
