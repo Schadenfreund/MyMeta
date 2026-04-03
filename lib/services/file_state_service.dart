@@ -4,6 +4,7 @@ import '../backend/match_result.dart';
 import '../backend/core_backend.dart';
 import 'package:cross_file/cross_file.dart';
 import 'settings_service.dart';
+import 'poster_cache_service.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:http/http.dart' as http;
@@ -82,6 +83,8 @@ class FileStateService with ChangeNotifier {
         anidbClientId: settings.anidbClientId,
         metadataSource: settings.metadataSource,
         useSeasonPoster: settings.useSeasonPoster,
+        episodeDigits: settings.episodeDigits,
+        seasonDigits: settings.seasonDigits,
       );
 
       _matchResults.clear();
@@ -150,6 +153,8 @@ class FileStateService with ChangeNotifier {
         anidbClientId: settings.anidbClientId,
         metadataSource: settings.metadataSource,
         useSeasonPoster: settings.useSeasonPoster,
+        episodeDigits: settings.episodeDigits,
+        seasonDigits: settings.seasonDigits,
       );
 
       if (results.isNotEmpty) {
@@ -208,8 +213,12 @@ class FileStateService with ChangeNotifier {
         _matchResults[i].newName = newNames[i];
       }
 
-      // Perform Rename
-      CoreBackend.performFileRenaming(oldPaths, newNames);
+      final metadataOnly = settings?.metadataOnly ?? false;
+
+      // Perform Rename (skip in metadata-only mode)
+      if (!metadataOnly) {
+        CoreBackend.performFileRenaming(oldPaths, newNames);
+      }
 
       // Create UserData/Cache folder for temporary cover files
       final exePath = Platform.resolvedExecutable;
@@ -222,47 +231,63 @@ class FileStateService with ChangeNotifier {
         debugPrint("📁 Created cache directory: ${cacheDir.path}");
       }
 
-      // Download or Copy Posters and Embed
-      // Track which cover files we've created so we can clean them up later
-      Set<String> coverFilesCreated = {};
-
+      // Download, resize, cache and Embed Posters
       for (int i = 0; i < _inputFiles.length; i++) {
         String parentDir = p.dirname(oldPaths[i]);
         String newName = newNames[i];
-        String newFullPath = p.join(parentDir, newName);
+        // In metadata-only mode the file stays at its original path
+        String newFullPath = metadataOnly
+            ? oldPaths[i]
+            : p.join(parentDir, newName);
 
-        // Use filename as unique identifier for the cover (avoid conflicts)
+        // Use filename as unique identifier for temp cover (for coverBytes)
         final fileName = p.basenameWithoutExtension(newName);
-        File coverFile = File(p.join(cacheDir.path, '${fileName}_cover.jpg'));
+        File tempCoverFile = File(p.join(cacheDir.path, '${fileName}_cover.jpg'));
+        String? coverPathForEmbedding;
 
         // Priority 1: Use coverBytes if available
         if (_matchResults[i].coverBytes != null) {
           try {
-            coverFile.writeAsBytesSync(_matchResults[i].coverBytes!);
-            if (coverFile.existsSync()) {
-              coverFilesCreated.add(coverFile.path);
-              debugPrint("✅ Cover written from bytes: ${coverFile.path}");
+            tempCoverFile.writeAsBytesSync(_matchResults[i].coverBytes!);
+            if (tempCoverFile.existsSync()) {
+              coverPathForEmbedding = tempCoverFile.path;
+              debugPrint("✅ Cover written from bytes: ${tempCoverFile.path}");
             }
           } catch (e) {
             debugPrint("⚠️  Failed to write cover from bytes: $e");
           }
         }
-        // Priority 2: Download/copy from posterUrl
+        // Priority 2: Cache and download/copy from posterUrl
         else {
           String? posterUrl = _matchResults[i].posterUrl;
           if (posterUrl != null && posterUrl.isNotEmpty) {
-            // If cover URL provided, download/copy it
-            if (posterUrl.startsWith('http')) {
-              // Download
-              await CoreBackend.downloadCover(posterUrl, coverFile.path);
-              if (coverFile.existsSync()) {
-                coverFilesCreated.add(coverFile.path);
+            String mediaType = _matchResults[i].season != null ? 'tv' : 'movie';
+            String? cachedPath = await PosterCacheService.downloadAndCachePoster(
+              posterUrl: posterUrl,
+              title: _matchResults[i].title ?? 'unknown',
+              year: _matchResults[i].year,
+              mediaType: mediaType,
+              season: _matchResults[i].season,
+            );
+
+            if (cachedPath != null) {
+              coverPathForEmbedding = cachedPath;
+              // Update MatchResult to track cached poster path
+              _matchResults[i] = _matchResults[i].copyWith(
+                cachedPosterPath: cachedPath,
+              );
+              debugPrint("✅ Using cached resized poster: $cachedPath");
+            } else if (posterUrl.startsWith('http')) {
+              // Fallback: Try direct download if cache fails
+              await CoreBackend.downloadCover(posterUrl, tempCoverFile.path);
+              if (tempCoverFile.existsSync()) {
+                coverPathForEmbedding = tempCoverFile.path;
               }
             } else if (File(posterUrl).existsSync()) {
-              // Copy local file
-              File(posterUrl).copySync(coverFile.path);
-              if (coverFile.existsSync()) {
-                coverFilesCreated.add(coverFile.path);
+              // Copy local file if it exists
+              File(posterUrl).copySync(tempCoverFile.path);
+              if (tempCoverFile.existsSync()) {
+                coverPathForEmbedding = tempCoverFile.path;
               }
             } else {
               debugPrint("⚠️  Poster URL not accessible: $posterUrl");
@@ -270,33 +295,35 @@ class FileStateService with ChangeNotifier {
           }
         }
 
-        // Embed Metadata (cover file is now guaranteed to exist if it should)
+        // Embed Metadata with poster (cached or temporary)
         debugPrint("🎬 Embedding metadata for: $newName");
         await CoreBackend.embedMetadata(
           newFullPath,
-          coverFile.existsSync() ? coverFile.path : null,
+          coverPathForEmbedding,
           _matchResults[i],
-          settings: settings, // Pass settings
+          settings: settings,
         );
 
         // Mark as renamed
         _inputFiles[i].renamedPath = newFullPath;
-      }
 
-      // NOW clean up all cover files we created
-      for (String coverPath in coverFilesCreated) {
-        try {
-          File(coverPath).deleteSync();
-          debugPrint("🗑️  Cleaned up cover: $coverPath");
-        } catch (e) {
-          debugPrint("⚠️  Failed to delete cover file: $e");
+        // Clean up temporary cover file (not cached files)
+        if (coverPathForEmbedding == tempCoverFile.path && tempCoverFile.existsSync()) {
+          try {
+            tempCoverFile.deleteSync();
+            debugPrint("🗑️  Cleaned up temp cover: ${tempCoverFile.path}");
+          } catch (e) {
+            debugPrint("⚠️  Failed to delete temp cover file: $e");
+          }
         }
       }
 
-      // Save Undo State
-      _lastRenamedOldPaths = List.from(oldPaths);
-      _lastRenamedNewNames = List.from(newNames);
-      _canUndo = true;
+      // Save Undo State (only when files were actually renamed)
+      if (!metadataOnly) {
+        _lastRenamedOldPaths = List.from(oldPaths);
+        _lastRenamedNewNames = List.from(newNames);
+        _canUndo = true;
+      }
 
       // Do not clear list automatically. User must acknowledge.
     } catch (e) {
@@ -342,11 +369,18 @@ class FileStateService with ChangeNotifier {
       // Update the match result with sanitized name
       _matchResults[index].newName = newName;
 
-      String parentDir = p.dirname(oldPath);
-      String newFullPath = p.join(parentDir, newName);
+      final metadataOnly = settings?.metadataOnly ?? false;
 
-      debugPrint("📂 Renaming: $oldPath");
-      debugPrint("📂 To: $newFullPath");
+      String parentDir = p.dirname(oldPath);
+      // In metadata-only mode the file stays at its original path
+      String newFullPath = metadataOnly ? oldPath : p.join(parentDir, newName);
+
+      if (metadataOnly) {
+        debugPrint("📂 Metadata-only mode: embedding into $oldPath");
+      } else {
+        debugPrint("📂 Renaming: $oldPath");
+        debugPrint("📂 To: $newFullPath");
+      }
 
       // Verify the source file exists
       if (!File(oldPath).existsSync()) {
@@ -354,8 +388,10 @@ class FileStateService with ChangeNotifier {
         return false;
       }
 
-      // Perform Rename
-      CoreBackend.performFileRenaming([oldPath], [newName]);
+      // Perform Rename (skip in metadata-only mode)
+      if (!metadataOnly) {
+        CoreBackend.performFileRenaming([oldPath], [newName]);
+      }
 
       // Create UserData/Cache folder for temporary cover files
       final exePath = Platform.resolvedExecutable;
@@ -368,39 +404,57 @@ class FileStateService with ChangeNotifier {
         debugPrint("📁 Created cache directory: ${cacheDir.path}");
       }
 
-      // Use filename as unique identifier for the cover (avoid conflicts)
+      // Use filename as unique identifier for temp cover
       final fileName = p.basenameWithoutExtension(newName);
-      File coverFile = File(p.join(cacheDir.path, '${fileName}_cover.jpg'));
-      bool coverCreated = false;
+      File tempCoverFile = File(p.join(cacheDir.path, '${fileName}_cover.jpg'));
+      String? coverPathForEmbedding;
 
       // Priority 1: Use coverBytes if already available (from search or existing metadata)
       if (_matchResults[index].coverBytes != null) {
         try {
-          coverFile.writeAsBytesSync(_matchResults[index].coverBytes!);
-          if (coverFile.existsSync()) {
-            coverCreated = true;
-            debugPrint("✅ Cover written from bytes: ${coverFile.path}");
+          tempCoverFile.writeAsBytesSync(_matchResults[index].coverBytes!);
+          if (tempCoverFile.existsSync()) {
+            coverPathForEmbedding = tempCoverFile.path;
+            debugPrint("✅ Cover written from bytes: ${tempCoverFile.path}");
           }
         } catch (e) {
           debugPrint("⚠️  Failed to write cover from bytes: $e");
         }
       }
 
-      // Priority 2: Download or copy from posterUrl if coverBytes not available
-      if (!coverCreated) {
+      // Priority 2: Cache and download or copy from posterUrl if coverBytes not available
+      if (coverPathForEmbedding == null) {
         String? posterUrl = _matchResults[index].posterUrl;
         if (posterUrl != null && posterUrl.isNotEmpty) {
-          if (posterUrl.startsWith('http')) {
-            await CoreBackend.downloadCover(posterUrl, coverFile.path);
-            if (coverFile.existsSync()) {
-              coverCreated = true;
-              debugPrint("✅ Cover downloaded from URL: ${coverFile.path}");
+          String mediaType = _matchResults[index].season != null ? 'tv' : 'movie';
+          String? cachedPath = await PosterCacheService.downloadAndCachePoster(
+            posterUrl: posterUrl,
+            title: _matchResults[index].title ?? 'unknown',
+            year: _matchResults[index].year,
+            mediaType: mediaType,
+            season: _matchResults[index].season,
+          );
+
+          if (cachedPath != null) {
+            coverPathForEmbedding = cachedPath;
+            // Update MatchResult to track cached poster path
+            _matchResults[index] = _matchResults[index].copyWith(
+              cachedPosterPath: cachedPath,
+            );
+            debugPrint("✅ Using cached resized poster: $cachedPath");
+          } else if (posterUrl.startsWith('http')) {
+            // Fallback: Try direct download if cache fails
+            await CoreBackend.downloadCover(posterUrl, tempCoverFile.path);
+            if (tempCoverFile.existsSync()) {
+              coverPathForEmbedding = tempCoverFile.path;
+              debugPrint("✅ Cover downloaded from URL (fallback): ${tempCoverFile.path}");
             }
           } else if (File(posterUrl).existsSync()) {
-            File(posterUrl).copySync(coverFile.path);
-            if (coverFile.existsSync()) {
-              coverCreated = true;
-              debugPrint("✅ Cover copied from file: ${coverFile.path}");
+            // Copy local file if it exists
+            File(posterUrl).copySync(tempCoverFile.path);
+            if (tempCoverFile.existsSync()) {
+              coverPathForEmbedding = tempCoverFile.path;
+              debugPrint("✅ Cover copied from file: ${tempCoverFile.path}");
             }
           }
         }
@@ -410,18 +464,18 @@ class FileStateService with ChangeNotifier {
       debugPrint("🎬 Embedding metadata for: $newName");
       await CoreBackend.embedMetadata(
         newFullPath,
-        coverFile.existsSync() ? coverFile.path : null,
+        coverPathForEmbedding,
         _matchResults[index],
         settings: settings,
       );
 
-      // Clean up cover file if we created it
-      if (coverCreated && coverFile.existsSync()) {
+      // Clean up temporary cover file (not cached files)
+      if (coverPathForEmbedding == tempCoverFile.path && tempCoverFile.existsSync()) {
         try {
-          coverFile.deleteSync();
-          debugPrint("🗑️  Cleaned up cover: ${coverFile.path}");
+          tempCoverFile.deleteSync();
+          debugPrint("🗑️  Cleaned up temp cover: ${tempCoverFile.path}");
         } catch (e) {
-          debugPrint("⚠️  Failed to delete cover file: $e");
+          debugPrint("⚠️  Failed to delete temp cover file: $e");
         }
       }
 
@@ -482,17 +536,53 @@ class FileStateService with ChangeNotifier {
     }
   }
 
+  static const _videoExtensions = {
+    '.mp4', '.mkv', '.avi', '.mov', '.m4v', '.wmv', '.flv',
+    '.ts', '.m2ts', '.webm', '.mpg', '.mpeg',
+  };
+
+  /// Recursively lists video files inside a directory.
+  List<String> _listVideoFiles(String dirPath) {
+    try {
+      return Directory(dirPath)
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((f) =>
+              _videoExtensions.contains(p.extension(f.path).toLowerCase()))
+          .map((f) => f.path)
+          .toList()
+        ..sort();
+    } catch (e) {
+      debugPrint("⚠️  Failed to scan directory '$dirPath': $e");
+      return [];
+    }
+  }
+
   Future<void> addFiles(List<XFile> files, {SettingsService? settings}) async {
     _isAddingFiles = true;
     notifyListeners();
 
+    // Expand any dropped directories to their contained video files
+    final expanded = <XFile>[];
+    for (final file in files) {
+      if (FileSystemEntity.isDirectorySync(file.path)) {
+        final found = _listVideoFiles(file.path);
+        expanded.addAll(found.map((f) => XFile(f)));
+        debugPrint(
+            "📂 Expanded '${p.basename(file.path)}': ${found.length} video file(s)");
+      } else {
+        expanded.add(file);
+      }
+    }
+    final effectiveFiles = expanded;
+
     int filesWithMetadata = 0;
     int filesAdded = 0;
 
-    debugPrint("\n📁 Adding ${files.length} files...");
+    debugPrint("\n📁 Adding ${effectiveFiles.length} files...");
 
     try {
-      for (var file in files) {
+      for (var file in effectiveFiles) {
         // Avoid duplicates
         bool exists = _inputFiles.any((f) => f.fullFilePath == file.path);
         if (!exists) {

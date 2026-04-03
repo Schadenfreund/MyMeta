@@ -24,10 +24,10 @@ class ParsedMetadata {
 }
 
 class FilenameParser {
-  // Regex for S01E01 format
-  static final RegExp _sXXeXX = RegExp(r'[sS](\d{1,2})[eE](\d{1,2})', caseSensitive: false);
-  // Regex for 1x01 format
-  static final RegExp _numXnum = RegExp(r'(\d{1,2})x(\d{1,2})', caseSensitive: false);
+  // Regex for S01E01 / S01E001 / S01E0001 format (supports any digit count)
+  static final RegExp _sXXeXX = RegExp(r'[sS](\d+)[eE](\d+)', caseSensitive: false);
+  // Regex for 1x01 / 1x001 format (supports any digit count)
+  static final RegExp _numXnum = RegExp(r'(\d+)x(\d+)', caseSensitive: false);
   // Regex for Year (19xx or 20xx)
   static final RegExp _yearCheck = RegExp(r'\b(19|20)\d{2}\b');
   // Common separators

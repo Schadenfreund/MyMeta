@@ -29,10 +29,14 @@ class CoreBackend {
   /// and video track name embedded into media files.
   /// Movies:   "Title (Year)"             e.g. Inception (2010)
   /// TV shows: "Show S##E##: Episode"     e.g. Breaking Bad S01E05: Gray Matter
-  static String _buildContainerTitle(MatchResult metadata) {
+  static String _buildContainerTitle(
+    MatchResult metadata, {
+    int seasonDigits = 2,
+    int episodeDigits = 2,
+  }) {
     if (metadata.season != null && metadata.episode != null) {
-      final s = metadata.season!.toString().padLeft(2, '0');
-      final e = metadata.episode!.toString().padLeft(2, '0');
+      final s = metadata.season!.toString().padLeft(seasonDigits, '0');
+      final e = metadata.episode!.toString().padLeft(episodeDigits, '0');
       final base = '${metadata.title ?? ''} S${s}E${e}';
       final ep = metadata.episodeTitle;
       return (ep != null && ep.isNotEmpty) ? '$base: $ep' : base;
@@ -205,11 +209,21 @@ class CoreBackend {
                   );
                   try {
                     // Fetch episode details including description
-                    final episodeDetails = await tmdb.getEpisodeDetails(
-                      tvId,
-                      season,
-                      episode,
-                    );
+                    Map<String, dynamic>? episodeDetails =
+                        await tmdb.getEpisodeDetails(tvId, season, episode);
+
+                    // Fallback: some shows list early episodes under Season 0
+                    // (Specials) on TMDB rather than Season 1 (e.g. One Piece,
+                    // Solo Leveling, Fallout). Try Season 0 before skipping.
+                    if (episodeDetails == null && season == 1) {
+                      episodeDetails =
+                          await tmdb.getEpisodeDetails(tvId, 0, episode);
+                      if (episodeDetails != null) {
+                        debugPrint(
+                          '✅ Found S${season}E${episode} under Season 0 (Specials) for "${result['name']}"',
+                        );
+                      }
+                    }
 
                     if (episodeDetails != null) {
                       // Use episode-specific title and description
@@ -240,8 +254,9 @@ class CoreBackend {
             // Debug: Log what we're about to add
             debugPrint('📝 Creating TV MatchResult:');
             debugPrint('   Title: ${result['name']}');
+            final _airDate = result['first_air_date'] as String?;
             debugPrint(
-                '   Year: ${result['first_air_date']?.substring(0, 4) ?? "null"}');
+                '   Year: ${(_airDate != null && _airDate.length >= 4) ? _airDate.substring(0, 4) : "null"}');
             debugPrint('   Rating: $rating');
             debugPrint('   Content Rating: $contentRating');
             debugPrint('   Genres: ${genres?.join(", ") ?? "null"}');
@@ -604,6 +619,8 @@ class CoreBackend {
     String? anidbClientId,
     String metadataSource = 'tmdb',
     bool useSeasonPoster = false,
+    int episodeDigits = 2,
+    int seasonDigits = 2,
   }) async {
     List<MatchResult> results = [];
 
@@ -693,8 +710,8 @@ class CoreBackend {
           context = {
             "series_name": bestMatch.title,
             "year": bestMatch.year,
-            "season_number": record.season?.toString().padLeft(2, '0'),
-            "episode_number": record.episode?.toString().padLeft(2, '0'),
+            "season_number": record.season?.toString().padLeft(seasonDigits, '0'),
+            "episode_number": record.episode?.toString().padLeft(episodeDigits, '0'),
             "episode_title": bestMatch.episodeTitle ?? "Title",
           };
         } else {
@@ -1227,8 +1244,8 @@ class CoreBackend {
 
         Map<String, dynamic> context = {
           'series_name': title ?? show ?? 'Unknown Show',
-          'season_number': season.toString().padLeft(2, '0'),
-          'episode_number': episode.toString().padLeft(2, '0'),
+          'season_number': season.toString().padLeft(settings?.seasonDigits ?? 2, '0'),
+          'episode_number': episode.toString().padLeft(settings?.episodeDigits ?? 2, '0'),
           'episode_title': episodeTitle ?? '',
         };
 
@@ -1431,6 +1448,93 @@ class CoreBackend {
     return null;
   }
 
+  /// Remove old cover attachments from MKV file before attaching new one
+  /// Prevents duplicate covers and fixes Windows Explorer caching issues
+  static Future<void> _removeOldCoversFromMkv(
+    String filePath,
+    String mkvpropeditPath,
+  ) async {
+    try {
+      // Find all existing cover attachments
+      var identifyResult = await Process.run(
+        mkvpropeditPath.replaceAll('mkvpropedit.exe', 'mkvmerge.exe'),
+        ['--identify', filePath],
+        runInShell: false,
+      );
+
+      // Parse attachment IDs that need to be deleted
+      List<String> deleteArgs = [filePath];
+      RegExp attachmentRegex = RegExp(r'Attachment ID (\d+):.*cover');
+      for (var match in attachmentRegex.allMatches(
+        identifyResult.stdout.toString(),
+      )) {
+        deleteArgs.addAll(['--delete-attachment', match.group(1)!]);
+      }
+
+      // Delete existing covers if any found
+      if (deleteArgs.length > 1) {
+        await Process.run(mkvpropeditPath, deleteArgs, runInShell: false);
+        debugPrint('🗑️  Removed ${(deleteArgs.length - 1) ~/ 2} old cover(s) from MKV');
+      }
+    } catch (e) {
+      debugPrint('⚠️  Error removing old covers from MKV: $e');
+    }
+  }
+
+  /// Remove old cover (attached_pic) from MP4 file before attaching new one
+  /// Uses FFmpeg to re-encode video streams while dropping old cover
+  /// Prevents old cover from persisting in Windows Explorer
+  static Future<void> _removeOldCoversFromMp4(
+    String filePath,
+    String? ffmpegPath,
+  ) async {
+    if (ffmpegPath == null || ffmpegPath.isEmpty) return;
+
+    try {
+      // Check if file has attached images
+      final probeResult = await Process.run(
+        ffmpegPath.replaceAll('ffmpeg.exe', 'ffprobe.exe'),
+        [
+          '-v', 'error',
+          '-select_streams', 'v:1', // Check for second video stream (attached pic)
+          '-show_entries', 'stream=codec_type',
+          '-of', 'csv=p=0',
+          filePath,
+        ],
+        runInShell: false,
+      );
+
+      // If there's an attached picture stream, create a copy without it
+      if (probeResult.stdout.toString().contains('video')) {
+        final tempPath = '$filePath.TEMP.mp4';
+
+        debugPrint('⏳ Removing old cover from MP4...');
+        final result = await Process.run(
+          ffmpegPath,
+          [
+            '-i', filePath,
+            '-c', 'copy',
+            '-map', '0:v:0', // Only main video
+            '-map', '0:a?', // All audio
+            '-map', '0:s?', // All subtitles
+            '-map', '-0:v:1', // Exclude attached pictures
+            '-y',
+            tempPath,
+          ],
+          runInShell: false,
+        );
+
+        if (result.exitCode == 0 && File(tempPath).existsSync()) {
+          File(filePath).deleteSync();
+          File(tempPath).renameSync(filePath);
+          debugPrint('🗑️  Removed old cover from MP4');
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️  Error removing old covers from MP4: $e');
+    }
+  }
+
   /// Embed metadata into MKV file using mkvpropedit with XML tags (fast in-place)
   static Future<bool> _embedMetadataMkv(
     String filePath,
@@ -1451,31 +1555,16 @@ class CoreBackend {
     try {
       bool hasAttachment = false;
       bool hasTags = false;
-      final containerTitle = _buildContainerTitle(metadata);
+      final containerTitle = _buildContainerTitle(
+        metadata,
+        seasonDigits: settings?.seasonDigits ?? 2,
+        episodeDigits: settings?.episodeDigits ?? 2,
+      );
 
       // Step 1: Attach cover (delete existing covers first to prevent duplicates!)
       if (coverPath != null && File(coverPath).existsSync()) {
-        // First, find all existing cover attachments
-        var identifyResult = await Process.run(
-          toolPath.replaceAll('mkvpropedit.exe', 'mkvmerge.exe'),
-          ['--identify', filePath],
-          runInShell: false,
-        );
-
-        // Parse attachment IDs that need to be deleted
-        List<String> deleteArgs = [filePath];
-        RegExp attachmentRegex = RegExp(r'Attachment ID (\d+):.*cover');
-        for (var match in attachmentRegex.allMatches(
-          identifyResult.stdout.toString(),
-        )) {
-          deleteArgs.addAll(['--delete-attachment', match.group(1)!]);
-        }
-
-        // Delete existing covers if any found
-        if (deleteArgs.length > 1) {
-          await Process.run(toolPath, deleteArgs, runInShell: false);
-          debugPrint('Removed ${(deleteArgs.length - 1) ~/ 2} old cover(s)');
-        }
+        // Remove old covers to prevent duplicates and Windows Explorer caching issues
+        await _removeOldCoversFromMkv(filePath, toolPath);
 
         // Now add the new cover
         var result = await Process.run(
@@ -1593,6 +1682,11 @@ class CoreBackend {
     if (toolPath == null) {
       debugPrint('⚠️  AtomicParsley not available');
       return false;
+    }
+
+    // Remove old covers to prevent duplicates and Windows Explorer caching issues
+    if (coverPath != null && File(coverPath).existsSync()) {
+      await _removeOldCoversFromMp4(filePath, _ffmpegPath);
     }
 
     List<String> args = [filePath];
@@ -1793,6 +1887,11 @@ class CoreBackend {
       debugPrint("❌ FFmpeg not found - Configure in Settings or add to PATH");
       debugPrint("=" * 60 + "\n");
       return;
+    }
+
+    // Remove old covers for MP4 to prevent duplicates and Windows Explorer caching issues
+    if (ext == '.mp4' && hasCover) {
+      await _removeOldCoversFromMp4(filePath, _ffmpegPath);
     }
 
     // Build command

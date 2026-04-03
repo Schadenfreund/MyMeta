@@ -33,6 +33,9 @@ class MatchResult {
   // Search results for re-matching
   List<MatchResult>? searchResults; // List of alternative matches from last search
 
+  // Cached poster path - tracks where resized poster is stored locally
+  String? cachedPosterPath; // Path to resized cached poster in UserData/CachedPosters/
+
   MatchResult({
     required this.newName,
     this.posterUrl,
@@ -55,6 +58,7 @@ class MatchResult {
     this.tmdbId,
     this.alternativePosterUrls,
     this.searchResults,
+    this.cachedPosterPath,
   });
 
   /// Creates a copy of this MatchResult with the given fields replaced.
@@ -81,6 +85,7 @@ class MatchResult {
     int? tmdbId,
     List<String>? alternativePosterUrls,
     List<MatchResult>? searchResults,
+    String? cachedPosterPath,
     // Use special markers for nullable fields that should be explicitly set to null
     bool clearPosterUrl = false,
     bool clearCoverBytes = false,
@@ -90,6 +95,7 @@ class MatchResult {
     bool clearStudio = false,
     bool clearImdbId = false,
     bool clearEpisodeTitle = false,
+    bool clearCachedPosterPath = false,
   }) {
     return MatchResult(
       newName: newName ?? this.newName,
@@ -116,6 +122,9 @@ class MatchResult {
       alternativePosterUrls:
           alternativePosterUrls ?? this.alternativePosterUrls,
       searchResults: searchResults ?? this.searchResults,
+      cachedPosterPath: clearCachedPosterPath
+          ? null
+          : (cachedPosterPath ?? this.cachedPosterPath),
     );
   }
 }

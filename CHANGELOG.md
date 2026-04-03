@@ -5,7 +5,19 @@ All notable changes to MyMeta will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-f
+## [1.0.8] - 2026-04-03
+
+### Added
+
+- **Folder Drag-and-Drop** — Dropping a folder (or multiple folders) now scans recursively for video files inside instead of trying to rename the folder itself. Supports `.mp4`, `.mkv`, `.avi`, `.mov`, `.m4v`, `.wmv`, `.flv`, `.ts`, `.m2ts`, `.webm`, `.mpg`, `.mpeg`.
+- **Metadata-Only Mode** — New toggle button in the renamer toolbar. When active, clicking Apply embeds metadata into files without renaming them. Useful for bulk-updating embedded Genre/tags in an existing collection (e.g. fixing Plex library views) while keeping filenames untouched. Setting persists across sessions.
+- **Configurable Number Padding** — You can now choose how many digits to use for season and episode numbers: episode 2/3/4 digits (`E01` / `E001` / `E0001`), season 2/3 digits (`S01` / `S001`). Live preview updates instantly.
+
+### Fixed
+
+- **Episode Parsing Bug** — Regex `\d{1,2}` was truncating 3-digit episode numbers (e.g. `E001` parsed as episode `00` instead of `1`). Changed to `\d+` to capture any digit count correctly.
+- **TMDB Search Crash on Certain Shows** — TMDB occasionally returns an empty string for `first_air_date` rather than `null`. Calling `.substring(0, 4)` on an empty string threw `RangeError (end): Invalid value: Only valid value is 0: 4`, crashing the search and showing "No results found". Fixed with a proper length guard.
+- **Season 0 / Specials Fallback** — Shows that list their first episode under Season 0 (Specials) on TMDB — such as *One Piece (2023)*, *Solo Leveling*, and *Fallout* — now match correctly for Episode 1. The app retries with Season 0 before skipping a result, so S01E01 searches succeed even when TMDB stores the episode as S00E01.
 
 ## [1.0.5] - 2026-01-09
 

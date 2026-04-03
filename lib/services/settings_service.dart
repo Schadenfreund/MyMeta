@@ -12,6 +12,9 @@ class SettingsService with ChangeNotifier {
   List<String> _excludedFolders = [];
   bool _filenameAnalysisOnly = false;
   bool _useSeasonPoster = false;
+  int _episodeDigits = 2; // Padding width for episode numbers (2 = E01, 3 = E001, 4 = E0001)
+  int _seasonDigits = 2;  // Padding width for season numbers  (2 = S01, 3 = S001)
+  bool _metadataOnly = false; // Embed metadata without renaming files
   String _tmdbApiKey = "";
   String _omdbApiKey = "";
   String _anidbClientId = "";
@@ -45,6 +48,9 @@ class SettingsService with ChangeNotifier {
   List<String> get excludedFolders => _excludedFolders;
   bool get filenameAnalysisOnly => _filenameAnalysisOnly;
   bool get useSeasonPoster => _useSeasonPoster;
+  int get episodeDigits => _episodeDigits;
+  int get seasonDigits => _seasonDigits;
+  bool get metadataOnly => _metadataOnly;
   String get tmdbApiKey => _tmdbApiKey;
   String get omdbApiKey => _omdbApiKey;
   String get anidbClientId => _anidbClientId;
@@ -120,6 +126,9 @@ class SettingsService with ChangeNotifier {
       // Filename Analysis Only
       _filenameAnalysisOnly = data['filename_analysis_only'] ?? false;
       _useSeasonPoster = data['use_season_poster'] ?? false;
+      _episodeDigits = data['episode_digits'] ?? 2;
+      _seasonDigits = data['season_digits'] ?? 2;
+      _metadataOnly = data['metadata_only'] ?? false;
 
       // API Keys
       _tmdbApiKey = data['tmdb_api_key'] ?? "";
@@ -330,6 +339,9 @@ class SettingsService with ChangeNotifier {
         'excluded_folders': _excludedFolders,
         'filename_analysis_only': _filenameAnalysisOnly,
         'use_season_poster': _useSeasonPoster,
+        'episode_digits': _episodeDigits,
+        'season_digits': _seasonDigits,
+        'metadata_only': _metadataOnly,
         'tmdb_api_key': _tmdbApiKey,
         'omdb_api_key': _omdbApiKey,
         'anidb_client_id': _anidbClientId,
@@ -393,8 +405,26 @@ class SettingsService with ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setMetadataOnly(bool value) async {
+    _metadataOnly = value;
+    await _saveSettings();
+    notifyListeners();
+  }
+
   Future<void> setUseSeasonPoster(bool value) async {
     _useSeasonPoster = value;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> setEpisodeDigits(int digits) async {
+    _episodeDigits = digits.clamp(2, 4);
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> setSeasonDigits(int digits) async {
+    _seasonDigits = digits.clamp(2, 3);
     await _saveSettings();
     notifyListeners();
   }

@@ -4,6 +4,10 @@ import '../services/settings_service.dart';
 import '../widgets/app_card.dart';
 import '../theme/app_theme.dart';
 
+// Options for the padding selectors
+const _episodeOptions = [2, 3, 4];
+const _seasonOptions  = [2, 3];
+
 class FormatsPage extends StatefulWidget {
   const FormatsPage({super.key});
 
@@ -55,26 +59,56 @@ class _FormatsPageState extends State<FormatsPage> {
           bottom: AppSpacing.lg,
         ),
         children: [
-          // Series Format Card
-          _buildFormatCard(
-            context,
-            title: 'TV Series Format',
-            icon: Icons.tv_outlined,
-            description: 'How TV show episodes should be named',
-            controller: _seriesController,
-            onReset: () {
-              const defaultFormat =
-                  '{series_name} - S{season_number}E{episode_number} - {episode_title}';
-              _seriesController.text = defaultFormat;
-            },
-            tokens: const [
-              TokenInfo('{series_name}', 'Name of the TV series'),
-              TokenInfo('{season_number}', 'Season number (01, 02, etc.)'),
-              TokenInfo('{episode_number}', 'Episode number (01, 02, etc.)'),
-              TokenInfo('{episode_title}', 'Title of the episode'),
-              TokenInfo('{year}', 'Release year'),
-            ],
-          ),
+          // Series Format Card (with inline padding selectors)
+          Builder(builder: (context) {
+            final settings = context.watch<SettingsService>();
+            final accentColor = Theme.of(context).colorScheme.primary;
+            return _buildFormatCard(
+              context,
+              title: 'TV Series Format',
+              icon: Icons.tv_outlined,
+              description: 'How TV show episodes should be named',
+              controller: _seriesController,
+              onReset: () {
+                const defaultFormat =
+                    '{series_name} - S{season_number}E{episode_number} - {episode_title}';
+                _seriesController.text = defaultFormat;
+              },
+              tokens: const [
+                TokenInfo('{series_name}', 'Name of the TV series'),
+                TokenInfo('{season_number}', 'Season number (01, 02, etc.)'),
+                TokenInfo('{episode_number}', 'Episode number (01, 02, etc.)'),
+                TokenInfo('{episode_title}', 'Title of the episode'),
+                TokenInfo('{year}', 'Release year'),
+              ],
+              extraContent: Row(
+                children: [
+                  Text(
+                    'Number Padding',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  const Spacer(),
+                  _PaddingSelector(
+                    options: _seasonOptions,
+                    selected: settings.seasonDigits,
+                    onSelected: (v) => settings.setSeasonDigits(v),
+                    accentColor: accentColor,
+                    format: (n) => 'S${'1'.padLeft(n, '0')}',
+                  ),
+                  const SizedBox(width: 16),
+                  _PaddingSelector(
+                    options: _episodeOptions,
+                    selected: settings.episodeDigits,
+                    onSelected: (v) => settings.setEpisodeDigits(v),
+                    accentColor: accentColor,
+                    format: (n) => 'E${'1'.padLeft(n, '0')}',
+                  ),
+                ],
+              ),
+            );
+          }),
 
           const SizedBox(height: 16),
 
@@ -112,6 +146,7 @@ class _FormatsPageState extends State<FormatsPage> {
     required TextEditingController controller,
     required VoidCallback onReset,
     required List<TokenInfo> tokens,
+    Widget? extraContent,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final accentColor = Theme.of(context).colorScheme.primary;
@@ -245,6 +280,12 @@ class _FormatsPageState extends State<FormatsPage> {
           }).toList(),
         ),
 
+        // Extra content (e.g. padding selectors for TV series)
+        if (extraContent != null) ...[
+          const SizedBox(height: 20),
+          extraContent,
+        ],
+
         const SizedBox(height: 16),
 
         // Dynamic Preview
@@ -354,11 +395,12 @@ class _FormatsPageState extends State<FormatsPage> {
   }
 
   String _generatePreview(String pattern, List<TokenInfo> tokens) {
+    final settings = context.read<SettingsService>();
     // Sample data from The Simpsons S6E12 - Homer the Great
     final sampleData = {
       '{series_name}': 'The Simpsons',
-      '{season_number}': '06',
-      '{episode_number}': '12',
+      '{season_number}': '6'.padLeft(settings.seasonDigits, '0'),
+      '{episode_number}': '12'.padLeft(settings.episodeDigits, '0'),
       '{episode_title}': 'Homer the Great',
       '{year}': '1995',
       '{movie_name}': 'The Usual Suspects',
@@ -379,4 +421,64 @@ class TokenInfo {
   final String description;
 
   const TokenInfo(this.token, this.description);
+}
+
+/// Segmented button row for selecting a digit-padding width.
+/// Renders one chip per option showing the formatted example (e.g. "E01", "E001").
+class _PaddingSelector extends StatelessWidget {
+  final List<int> options;
+  final int selected;
+  final ValueChanged<int> onSelected;
+  final Color accentColor;
+  final String Function(int) format;
+
+  // ignore: prefer_const_constructors_in_immutables
+  _PaddingSelector({
+    required this.options,
+    required this.selected,
+    required this.onSelected,
+    required this.accentColor,
+    required this.format,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: options.map((n) {
+        final isActive = n == selected;
+        return Padding(
+          padding: const EdgeInsets.only(left: 6),
+          child: InkWell(
+            onTap: () => onSelected(n),
+            borderRadius: BorderRadius.circular(6),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: isActive
+                    ? accentColor
+                    : accentColor.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: isActive
+                      ? accentColor
+                      : accentColor.withOpacity(0.25),
+                ),
+              ),
+              child: Text(
+                format(n),
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isActive ? Colors.white : accentColor,
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
 }

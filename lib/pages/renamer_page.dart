@@ -309,12 +309,20 @@ class _RenamerPageState extends State<RenamerPage> {
                   const SizedBox(width: 8),
                 ],
 
+                // Metadata-Only toggle
+                if (hasFiles) ...[
+                  _buildMetadataOnlyToggle(context, settings, isDark),
+                  const SizedBox(width: 8),
+                ],
+
                 // Apply All Button - only if there are files to apply
                 if (canRename) ...[
                   _buildMinimalIconButton(
                     context,
                     icon: Icons.check,
-                    tooltip: 'Apply Metadata to All Files',
+                    tooltip: settings.metadataOnly
+                        ? 'Embed Metadata Only (no rename)'
+                        : 'Apply Metadata to All Files',
                     onPressed: () {
                       setState(() => _expandedIndex = null);
                       final settings = context.read<SettingsService>();
@@ -496,6 +504,47 @@ class _RenamerPageState extends State<RenamerPage> {
     );
   }
 
+  /// Toggle button for metadata-only mode (embed without renaming).
+  Widget _buildMetadataOnlyToggle(
+      BuildContext context, SettingsService settings, bool isDark) {
+    final isActive = settings.metadataOnly;
+    final accent = settings.accentColor;
+    final bgColor = isActive ? accent : (isDark ? AppColors.darkSurface : AppColors.lightSurface);
+    final iconColor = isActive ? Colors.white : (isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary);
+
+    return Tooltip(
+      message: isActive
+          ? 'Metadata Only: ON — files will not be renamed'
+          : 'Metadata Only: OFF — files will be renamed',
+      child: Material(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        elevation: isActive ? 2 : 1,
+        child: InkWell(
+          onTap: () => settings.setMetadataOnly(!isActive),
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: isActive
+                  ? null
+                  : Border.all(
+                      color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                    ),
+            ),
+            child: Icon(
+              Icons.drive_file_rename_outline,
+              size: 20,
+              color: iconColor,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // Inline Add Files Card
   Widget _buildAddFilesCard(BuildContext context, bool isDark) {
     return Card(
@@ -645,7 +694,7 @@ class _RenamerPageState extends State<RenamerPage> {
                             output.title != null &&
                             output.title!.isNotEmpty)
                           Text(
-                            _buildMetadataPreview(output),
+                            _buildMetadataPreview(output, seasonDigits: settings.seasonDigits, episodeDigits: settings.episodeDigits),
                             style:
                                 Theme.of(context).textTheme.bodySmall?.copyWith(
                                       fontSize: 12,
@@ -715,7 +764,7 @@ class _RenamerPageState extends State<RenamerPage> {
                             output.title != null &&
                             output.title!.isNotEmpty)
                           Text(
-                            _buildMetadataPreview(output),
+                            _buildMetadataPreview(output, seasonDigits: settings.seasonDigits, episodeDigits: settings.episodeDigits),
                             style: Theme.of(context)
                                 .textTheme
                                 .bodySmall
@@ -760,103 +809,14 @@ class _RenamerPageState extends State<RenamerPage> {
                         fileState.resetRenamedStatus(index);
                       }
 
-                      // Auto-matched files open Fix Match modal
-                      if (_autoMatchedIndices.contains(index) &&
-                          output?.searchResults != null &&
-                          output!.searchResults!.isNotEmpty) {
-                        // Show Fix Match modal
-                        await showDialog(
-                          context: context,
-                          builder: (context) => Dialog(
-                            child: Container(
-                              width: 700,
-                              height: 600,
-                              padding: const EdgeInsets.all(24),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Header
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        Icons.search,
-                                        color: settings.accentColor,
-                                        size: 28,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Text(
-                                          'Fix Match',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .headlineSmall,
-                                        ),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.close),
-                                        onPressed: () => Navigator.pop(context),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  // Subtitle
-                                  Text(
-                                    'Select the correct match for: ${input.fileName}',
-                                    style:
-                                        Theme.of(context).textTheme.bodyMedium,
-                                  ),
-                                  const SizedBox(height: 24),
-                                  // Search results list
-                                  Expanded(
-                                    child: ListView.builder(
-                                      itemCount: output.searchResults!.length,
-                                      itemBuilder: (context, i) {
-                                        final result = output.searchResults![i];
-                                        return ListTile(
-                                          leading: result.posterUrl != null
-                                              ? Image.network(
-                                                  result.posterUrl!,
-                                                  width: 40,
-                                                  errorBuilder: (_, __, ___) =>
-                                                      const Icon(Icons.movie),
-                                                )
-                                              : const Icon(Icons.movie),
-                                          title:
-                                              Text(result.title ?? 'Unknown'),
-                                          subtitle: Text(
-                                            '${result.year ?? '—'} • ${result.type ?? 'Unknown'}',
-                                          ),
-                                          onTap: () async {
-                                            Navigator.pop(context);
-                                            // Complete the metadata with cover and formatted name
-                                            await _applyFixMatchResult(
-                                              index,
-                                              result,
-                                              output.searchResults!,
-                                              input,
-                                              fileState,
-                                              settings,
-                                            );
-                                            setState(() {
-                                              // Remove from auto-matched since user manually selected
-                                              _autoMatchedIndices.remove(index);
-                                              _searchedIndices.add(index);
-                                            });
-                                          },
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      } else {
-                        // Manual search for non-auto-matched files
-                        await _performSearch(context, index, input, fileState,
-                            context.read<SettingsService>());
-                      }
+                      await _showSearchModal(
+                        context,
+                        index,
+                        input,
+                        fileState,
+                        settings,
+                        initialResults: output?.searchResults,
+                      );
                     },
                     tooltip: _autoMatchedIndices.contains(index)
                         ? "Fix Match - Select different result"
@@ -895,7 +855,7 @@ class _RenamerPageState extends State<RenamerPage> {
               onCancel: () => _toggleExpanded(index),
               onSearch: () {
                 final settings = context.read<SettingsService>();
-                _performSearch(context, index, input, fileState, settings);
+                _showSearchModal(context, index, input, fileState, settings);
               },
               onRename: (MatchResult result) async {
                 // Update the match result and apply to file
@@ -921,13 +881,13 @@ class _RenamerPageState extends State<RenamerPage> {
     );
   }
 
-  String _buildMetadataPreview(MatchResult output) {
+  String _buildMetadataPreview(MatchResult output, {int seasonDigits = 2, int episodeDigits = 2}) {
     if (output.type == 'episode') {
       String season = output.season != null
-          ? 'S${output.season.toString().padLeft(2, '0')}'
+          ? 'S${output.season.toString().padLeft(seasonDigits, '0')}'
           : 'S??';
       String episode = output.episode != null
-          ? 'E${output.episode.toString().padLeft(2, '0')}'
+          ? 'E${output.episode.toString().padLeft(episodeDigits, '0')}'
           : 'E??';
       String year = output.year != null ? ' • ${output.year}' : '';
       return "${output.title ?? 'Unknown'} • $season$episode$year";
@@ -1021,20 +981,35 @@ class _RenamerPageState extends State<RenamerPage> {
     );
   }
 
-  /// Performs metadata search for a single file
-  Future<void> _performSearch(
+  /// Resolves the active metadata API source and key from settings.
+  static ({String source, String apiKey})? _resolveApi(SettingsService settings) {
+    final preferred = settings.metadataSource;
+    final keys = {
+      'tmdb': settings.tmdbApiKey,
+      'omdb': settings.omdbApiKey,
+      'anidb': settings.anidbClientId,
+    };
+    if (keys[preferred]?.isNotEmpty == true) {
+      return (source: preferred, apiKey: keys[preferred]!);
+    }
+    for (final entry in keys.entries) {
+      if (entry.value.isNotEmpty) return (source: entry.key, apiKey: entry.value);
+    }
+    return null;
+  }
+
+  /// Unified search modal — used for both first-time search and Fix Match.
+  /// Shows a text field for the query, a search button, and a results list.
+  Future<void> _showSearchModal(
     BuildContext context,
     int index,
     MediaRecord input,
     FileStateService fileState,
-    SettingsService settings,
-  ) async {
-    // Smart API selection - use any available API
-    final hasTmdb = settings.tmdbApiKey.isNotEmpty;
-    final hasOmdb = settings.omdbApiKey.isNotEmpty;
-    final hasAnidb = settings.anidbClientId.isNotEmpty;
-
-    if (!hasTmdb && !hasOmdb && !hasAnidb) {
+    SettingsService settings, {
+    List<MatchResult>? initialResults,
+  }) async {
+    final api = _resolveApi(settings);
+    if (api == null) {
       SnackbarHelper.showWarning(
         context,
         'No API keys configured. Go to Settings to add at least one (TMDB, OMDb, or AniDB).',
@@ -1042,52 +1017,262 @@ class _RenamerPageState extends State<RenamerPage> {
       return;
     }
 
-    // No validation - matchSingleFile will auto-select available API
+    final searchController = TextEditingController(
+      text: input.title ?? input.fileName,
+    );
 
-    // Get current match result to check if user has edited season/episode
+    List<MatchResult> results = List.from(initialResults ?? []);
+    bool isSearching = false;
+    String? errorMessage;
+
+    // Get season/episode context from current match or file
     final currentMatch = fileState.matchResults.length > index
         ? fileState.matchResults[index]
         : null;
+    final season = currentMatch?.season ?? input.season;
+    final episode = currentMatch?.episode ?? input.episode;
 
-    // Use edited season/episode if available, otherwise use filename values
-    final searchSeason = currentMatch?.season;
-    final searchEpisode = currentMatch?.episode;
+    await showDialog(
+      context: context,
+      builder: (dialogContext) {
+        // Auto-search on open when there are no initial results
+        bool didAutoSearch = initialResults != null && initialResults.isNotEmpty;
 
-    if (searchSeason != null || searchEpisode != null) {
-      debugPrint(
-          '🔍 Searching with user-edited S${searchSeason}E${searchEpisode}');
-    }
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            // Trigger auto-search once
+            if (!didAutoSearch) {
+              didAutoSearch = true;
+              Future.microtask(() async {
+                setModalState(() => isSearching = true);
+                try {
+                  final newResults = await CoreBackend.searchMetadata(
+                    title: searchController.text.trim(),
+                    year: input.year,
+                    isMovie: input.type == 'movie',
+                    source: api.source,
+                    apiKey: api.apiKey,
+                    season: season,
+                    episode: episode,
+                    useSeasonPoster: settings.useSeasonPoster,
+                  );
+                  setModalState(() {
+                    results = newResults;
+                    isSearching = false;
+                    if (newResults.isEmpty) {
+                      errorMessage = 'No results found';
+                    }
+                  });
+                } catch (e) {
+                  setModalState(() {
+                    isSearching = false;
+                    errorMessage = 'Search failed: $e';
+                  });
+                }
+              });
+            }
 
-    SnackbarHelper.showInfo(
-      context,
-      'Searching for "${input.fileName}"...',
+            Future<void> doSearch() async {
+              final query = searchController.text.trim();
+              if (query.isEmpty) return;
+              setModalState(() {
+                isSearching = true;
+                errorMessage = null;
+              });
+              try {
+                final newResults = await CoreBackend.searchMetadata(
+                  title: query,
+                  year: null, // Don't constrain re-searches by year
+                  isMovie: input.type == 'movie',
+                  source: api.source,
+                  apiKey: api.apiKey,
+                  season: season,
+                  episode: episode,
+                  useSeasonPoster: settings.useSeasonPoster,
+                );
+                setModalState(() {
+                  results = newResults;
+                  isSearching = false;
+                  if (newResults.isEmpty) {
+                    errorMessage = 'No results found for "$query"';
+                  }
+                });
+              } catch (e) {
+                setModalState(() {
+                  isSearching = false;
+                  errorMessage = 'Search failed: $e';
+                });
+              }
+            }
+
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+
+            return Dialog(
+              child: Container(
+                width: 700,
+                height: 600,
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header
+                    Row(
+                      children: [
+                        Icon(Icons.search, color: settings.accentColor, size: 28),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Select Match',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Search row
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: searchController,
+                            decoration: InputDecoration(
+                              hintText: 'Search title...',
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: settings.accentColor,
+                                  width: 1.5,
+                                ),
+                              ),
+                            ),
+                            onSubmitted: (_) => doSearch(),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton.icon(
+                          onPressed: isSearching ? null : doSearch,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: settings.accentColor,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                          ),
+                          icon: const Icon(Icons.search, size: 18),
+                          label: const Text('Search'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Results / loading / error
+                    Expanded(
+                      child: isSearching
+                          ? Center(
+                              child: CircularProgressIndicator(
+                                color: settings.accentColor,
+                              ),
+                            )
+                          : errorMessage != null && results.isEmpty
+                              ? Center(
+                                  child: Text(
+                                    errorMessage!,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          color: isDark
+                                              ? AppColors.darkTextSecondary
+                                              : AppColors.lightTextSecondary,
+                                        ),
+                                  ),
+                                )
+                              : ListView.separated(
+                                  itemCount: results.length,
+                                  separatorBuilder: (_, __) => const Divider(height: 1),
+                                  itemBuilder: (context, i) {
+                                    final result = results[i];
+                                    final subtitle = [
+                                      if (result.year != null) '${result.year}',
+                                      result.type ?? 'Unknown',
+                                      if (result.rating != null)
+                                        '\u2605 ${result.rating!.toStringAsFixed(1)}',
+                                      if (result.genres != null &&
+                                          result.genres!.isNotEmpty)
+                                        result.genres!.take(2).join(', '),
+                                    ].join(' \u2022 ');
+
+                                    return ListTile(
+                                      leading: ClipRRect(
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: result.posterUrl != null
+                                            ? Image.network(
+                                                result.posterUrl!,
+                                                width: 40,
+                                                height: 56,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (_, __, ___) =>
+                                                    const SizedBox(
+                                                  width: 40,
+                                                  height: 56,
+                                                  child: Icon(Icons.movie),
+                                                ),
+                                              )
+                                            : const SizedBox(
+                                                width: 40,
+                                                height: 56,
+                                                child: Icon(Icons.movie),
+                                              ),
+                                      ),
+                                      title: Text(result.title ?? 'Unknown'),
+                                      subtitle: Text(
+                                        subtitle,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      onTap: () async {
+                                        Navigator.pop(context);
+                                        await _applyFixMatchResult(
+                                          index,
+                                          result,
+                                          results,
+                                          input,
+                                          fileState,
+                                          settings,
+                                        );
+                                        setState(() {
+                                          _autoMatchedIndices.remove(index);
+                                          _searchedIndices.add(index);
+                                        });
+                                      },
+                                    );
+                                  },
+                                ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
 
-    await fileState.matchSingleFile(
-      index,
-      settings,
-      overrideSeason: searchSeason,
-      overrideEpisode: searchEpisode,
-    );
-
-    if (!context.mounted) return;
-
-    final result = fileState.matchResults.length > index
-        ? fileState.matchResults[index]
-        : null;
-
-    if (result != null && result.title != null && result.title!.isNotEmpty) {
-      setState(() => _searchedIndices.add(index));
-      SnackbarHelper.showSuccess(
-        context,
-        'Found: ${result.title}${result.year != null ? " (${result.year})" : ""}',
-      );
-    } else {
-      SnackbarHelper.showWarning(
-        context,
-        'No match found. Try editing metadata manually.',
-      );
-    }
+    searchController.dispose();
   }
 
   /// Applies a Fix Match result with complete metadata (cover download + formatted name)
@@ -1131,9 +1316,9 @@ class _RenamerPageState extends State<RenamerPage> {
         "series_name": completeResult.title,
         "year": completeResult.year,
         "season_number":
-            completeResult.season?.toString().padLeft(2, '0') ?? "00",
+            completeResult.season?.toString().padLeft(settings.seasonDigits, '0') ?? "00",
         "episode_number":
-            completeResult.episode?.toString().padLeft(2, '0') ?? "00",
+            completeResult.episode?.toString().padLeft(settings.episodeDigits, '0') ?? "00",
         "episode_title": completeResult.episodeTitle ?? "",
       };
     } else {
