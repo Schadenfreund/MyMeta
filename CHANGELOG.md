@@ -5,6 +5,14 @@ All notable changes to MyMeta will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-04-04
+
+### Fixed
+
+- **Cover Art Embedding** — Fixed covers not being embedded into media files despite being visible in the UI. The poster cache service now falls back to caching the original download when FFmpeg resize is unavailable, instead of discarding the downloaded poster entirely.
+- **FFmpeg Discovery for Poster Resize** — `ImageUtils` now checks `UserData/tools/ffmpeg/` (the recommended portable location) in addition to the app directory and system PATH.
+- **Cover Fallback Chain** — If in-memory cover bytes fail to write to disk, the poster URL download fallback now properly kicks in instead of being skipped.
+
 ## [1.1.0] - 2026-04-04
 
 ### Fixed

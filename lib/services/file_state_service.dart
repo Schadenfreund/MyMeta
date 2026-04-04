@@ -257,8 +257,9 @@ class FileStateService with ChangeNotifier {
             debugPrint("⚠️  Failed to write cover from bytes: $e");
           }
         }
-        // Priority 2: Cache and download/copy from posterUrl
-        else {
+
+        // Priority 2: Download from posterUrl (also used as fallback if coverBytes write failed)
+        if (coverPathForEmbedding == null) {
           String? posterUrl = _matchResults[i].posterUrl;
           if (posterUrl != null && posterUrl.isNotEmpty) {
             String mediaType = _matchResults[i].season != null ? 'tv' : 'movie';
@@ -272,25 +273,20 @@ class FileStateService with ChangeNotifier {
 
             if (cachedPath != null) {
               coverPathForEmbedding = cachedPath;
-              // Update MatchResult to track cached poster path
               _matchResults[i] = _matchResults[i].copyWith(
                 cachedPosterPath: cachedPath,
               );
-              debugPrint("✅ Using cached resized poster: $cachedPath");
+              debugPrint("✅ Using cached poster: $cachedPath");
             } else if (posterUrl.startsWith('http')) {
-              // Fallback: Try direct download if cache fails
               await CoreBackend.downloadCover(posterUrl, tempCoverFile.path);
-              if (tempCoverFile.existsSync()) {
+              if (tempCoverFile.existsSync() && tempCoverFile.lengthSync() > 1000) {
                 coverPathForEmbedding = tempCoverFile.path;
               }
             } else if (File(posterUrl).existsSync()) {
-              // Copy local file if it exists
               File(posterUrl).copySync(tempCoverFile.path);
               if (tempCoverFile.existsSync()) {
                 coverPathForEmbedding = tempCoverFile.path;
               }
-            } else {
-              debugPrint("⚠️  Poster URL not accessible: $posterUrl");
             }
           }
         }
@@ -443,9 +439,8 @@ class FileStateService with ChangeNotifier {
             );
             debugPrint("✅ Using cached resized poster: $cachedPath");
           } else if (posterUrl.startsWith('http')) {
-            // Fallback: Try direct download if cache fails
             await CoreBackend.downloadCover(posterUrl, tempCoverFile.path);
-            if (tempCoverFile.existsSync()) {
+            if (tempCoverFile.existsSync() && tempCoverFile.lengthSync() > 1000) {
               coverPathForEmbedding = tempCoverFile.path;
               debugPrint("✅ Cover downloaded from URL (fallback): ${tempCoverFile.path}");
             }
