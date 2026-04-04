@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd.exe /c \"flutter analyze lib/services/update_service.dart lib/widgets/update_check_card.dart\")",
+      "Bash(cmd.exe /c \"cd /d \\\\\"c:\\\\Users\\\\iBuri\\\\My Drive\\\\Code\\\\Flutter\\\\MyMeta\\\\\" && flutter analyze lib\\\\services\\\\update_service.dart lib\\\\widgets\\\\update_check_card.dart\")",
+      "Bash(cmd.exe /c \"cd /d c:\\\\Users\\\\iBuri && flutter --version\")"
+    ]
+  }
+}

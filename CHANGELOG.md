@@ -5,6 +5,27 @@ All notable changes to MyMeta will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-04-04
+
+### Fixed
+
+- **Software Updates** — The auto-update feature now works reliably. Replaced PowerShell script with a CMD batch script (avoids execution policy blocks), switched to `robocopy` for file copying with retry logic, and added logging for easier troubleshooting. Old covers and stale files in the app directory are properly replaced while `UserData/` (settings, tools, database) is preserved.
+
+### Added
+
+- **Persistent Update Downloads** — Updates are now downloaded into `UserData/Updates/` instead of the system temp directory. Clicking "Restart Later" keeps the download; on next launch the Settings card shows a "Restart Now to Update" banner so you can apply it without re-downloading.
+
+### Changed
+
+- **ZIP Extraction Hardening** — Normalized path separators when extracting release archives, preventing failures when the ZIP was created on Windows with backslash entries.
+
+## [1.0.9] - 2026-04-04
+
+### Fixed
+
+- **TV Show Metadata Embedding** — Fixed an issue where TV show episodes would only embed the title and video track name while all other metadata (Description, Genre, Actors, Rating, Season/Episode numbers) was missing. The MKV embedding function returned success unconditionally even when XML tag writing failed, preventing the FFmpeg fallback from triggering. Also hardened the XML escaping to handle quotes and apostrophes in metadata values that could produce invalid XML.
+- **Number Padding in MP4/FFmpeg** — The MP4 (AtomicParsley) and FFmpeg embedding paths were using hardcoded 2-digit padding instead of the user's configured season/episode digit settings.
+
 ## [1.0.8] - 2026-04-03
 
 ### Added
@@ -18,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Episode Parsing Bug** — Regex `\d{1,2}` was truncating 3-digit episode numbers (e.g. `E001` parsed as episode `00` instead of `1`). Changed to `\d+` to capture any digit count correctly.
 - **TMDB Search Crash on Certain Shows** — TMDB occasionally returns an empty string for `first_air_date` rather than `null`. Calling `.substring(0, 4)` on an empty string threw `RangeError (end): Invalid value: Only valid value is 0: 4`, crashing the search and showing "No results found". Fixed with a proper length guard.
 - **Season 0 / Specials Fallback** — Shows that list their first episode under Season 0 (Specials) on TMDB — such as *One Piece (2023)*, *Solo Leveling*, and *Fallout* — now match correctly for Episode 1. The app retries with Season 0 before skipping a result, so S01E01 searches succeed even when TMDB stores the episode as S00E01.
+
+### Changed
+
+- **Unified Search Modal** — The per-file search button and Fix Match modal have been merged into a single "Select Match" dialog with a search text field. Users can now type a custom search query and pick from results, regardless of whether the file was auto-matched. The inline metadata editor's search button also opens the same modal.
+- **Formats Page** — The standalone "Number Padding" card has been folded into the TV Series Format card as a compact inline row, reducing clutter. The preview now reflects the actual padding settings.
 
 ## [1.0.5] - 2026-01-09
 

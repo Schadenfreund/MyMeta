@@ -11,6 +11,7 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
+.claude/
 
 # IntelliJ related
 *.iml
@@ -57,3 +58,5 @@ API.txt
 
 # Personal developer notes (not for repo)
 HOW_TO_UPDATE.md
+/test/
+
