@@ -1598,7 +1598,9 @@ class CoreBackend {
           String escaped = value
               .replaceAll('&', '&amp;')
               .replaceAll('<', '&lt;')
-              .replaceAll('>', '&gt;');
+              .replaceAll('>', '&gt;')
+              .replaceAll('"', '&quot;')
+              .replaceAll("'", '&apos;');
           xml.writeln(
             '<Simple><Name>$name</Name><String>$escaped</String></Simple>',
           );
@@ -1664,7 +1666,7 @@ class CoreBackend {
         debugPrint('MKV complete (fast in-place)');
         return true;
       }
-      return true;
+      return false; // Neither tags nor cover succeeded — fall back to FFmpeg
     } catch (e) {
       debugPrint('Error: $e');
       return false;
@@ -1692,7 +1694,11 @@ class CoreBackend {
     List<String> args = [filePath];
 
     // Map metadata fields to AtomicParsley arguments
-    final containerTitle = _buildContainerTitle(metadata);
+    final containerTitle = _buildContainerTitle(
+      metadata,
+      seasonDigits: settings?.seasonDigits ?? 2,
+      episodeDigits: settings?.episodeDigits ?? 2,
+    );
     if (containerTitle.isNotEmpty) {
       args.addAll(['--title', containerTitle]);
     }
@@ -1957,7 +1963,11 @@ class CoreBackend {
 
     // Basic Info — use the formatted container title for both the file title tag
     // and the video stream title so media players display it correctly.
-    final containerTitle = _buildContainerTitle(metadata);
+    final containerTitle = _buildContainerTitle(
+      metadata,
+      seasonDigits: settings?.seasonDigits ?? 2,
+      episodeDigits: settings?.episodeDigits ?? 2,
+    );
     addMeta('title', containerTitle);
     if (containerTitle.isNotEmpty) {
       args.addAll(['-metadata:s:v:0', 'title=${_escapeMetadata(containerTitle)}']);

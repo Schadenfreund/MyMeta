@@ -1,10 +1,17 @@
-// Removed unused import
+import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:archive/archive_io.dart';
 import 'package:path/path.dart' as p;
+
+/// A pending update that has been downloaded and is ready to install
+class PendingUpdate {
+  final String version;
+  final String scriptPath;
+  PendingUpdate({required this.version, required this.scriptPath});
+}
 
 /// Service for checking and installing updates from GitHub Releases
 class UpdateService {
@@ -15,6 +22,63 @@ class UpdateService {
 
   /// Get the path to the update script (if update was downloaded)
   String? get updateScriptPath => _updateScriptPath;
+
+  /// Get the updates directory path (AppDir/UserData/Updates/)
+  static String getUpdatesDir() {
+    final exeDir = p.dirname(Platform.resolvedExecutable);
+    return p.join(exeDir, 'UserData', 'Updates');
+  }
+
+  /// Check if there's a pending update ready to install.
+  /// Returns null if no valid pending update exists.
+  /// Automatically cleans up if the update was already applied.
+  Future<PendingUpdate?> checkPendingUpdate() async {
+    try {
+      final updatesDir = getUpdatesDir();
+      final pendingFile = File(p.join(updatesDir, 'pending.json'));
+      if (!pendingFile.existsSync()) return null;
+
+      final content = await pendingFile.readAsString();
+      final data = jsonDecode(content) as Map<String, dynamic>;
+      final version = data['version'] as String;
+      final scriptPath = data['scriptPath'] as String;
+
+      // Check if we're already on this version (update already completed)
+      final packageInfo = await PackageInfo.fromPlatform();
+      if (!_isNewerVersion(packageInfo.version, version)) {
+        debugPrint('✅ Pending update v$version already applied, cleaning up');
+        await cleanupPendingUpdate();
+        return null;
+      }
+
+      // Check if the script still exists
+      if (!File(scriptPath).existsSync()) {
+        debugPrint('⚠️ Pending update script missing, cleaning up');
+        await cleanupPendingUpdate();
+        return null;
+      }
+
+      debugPrint('📦 Found pending update: v$version');
+      _updateScriptPath = scriptPath;
+      return PendingUpdate(version: version, scriptPath: scriptPath);
+    } catch (e) {
+      debugPrint('⚠️ Error checking pending update: $e');
+      return null;
+    }
+  }
+
+  /// Clean up the updates directory
+  Future<void> cleanupPendingUpdate() async {
+    try {
+      final updatesDir = Directory(getUpdatesDir());
+      if (await updatesDir.exists()) {
+        await updatesDir.delete(recursive: true);
+        debugPrint('🧹 Cleaned up updates directory');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error cleaning up updates: $e');
+    }
+  }
 
   /// Check if a newer version is available on GitHub
   Future<UpdateInfo?> checkForUpdates() async {
@@ -58,8 +122,9 @@ class UpdateService {
     return null;
   }
 
-  /// Download and install update
-  /// Returns true if successful, false otherwise
+  /// Download and install update into AppDir/UserData/Updates/.
+  /// The update persists so the user can restart later.
+  /// Returns true if successful, false otherwise.
   Future<bool> downloadAndInstall(
     UpdateInfo updateInfo,
     Function(double progress, String status) onProgress,
@@ -67,9 +132,15 @@ class UpdateService {
     try {
       onProgress(0.0, 'Preparing download...');
 
+      // Use AppDir/UserData/Updates/ so the download persists across sessions
+      final updatesDir = Directory(getUpdatesDir());
+      if (await updatesDir.exists()) {
+        await updatesDir.delete(recursive: true);
+      }
+      await updatesDir.create(recursive: true);
+
       final dio = _createDio(receiveTimeout: const Duration(minutes: 5));
-      final tempDir = await Directory.systemTemp.createTemp('mymeta_update_');
-      final zipPath = p.join(tempDir.path, 'update.zip');
+      final zipPath = p.join(updatesDir.path, 'update.zip');
 
       debugPrint('📥 Downloading update from: ${updateInfo.downloadUrl}');
 
@@ -96,22 +167,28 @@ class UpdateService {
       final archive = ZipDecoder().decodeBytes(bytes);
 
       // Find the root folder in the archive (e.g., MyMeta-v1.0.1-windows/)
-      final rootFolder = archive.first.name.split('/').first;
-      final extractPath = p.join(tempDir.path, 'extracted');
+      // Normalize path separators — Compress-Archive on Windows may use backslashes
+      final firstEntry = archive.first.name.replaceAll('\\', '/');
+      final rootFolder = firstEntry.split('/').first;
+      final extractPath = p.join(updatesDir.path, 'extracted');
 
       // Extract all files
       for (final file in archive) {
-        final filename = file.name;
-        if (file.isFile) {
+        final normalizedName = file.name.replaceAll('\\', '/');
+        if (file.isFile && normalizedName.startsWith('$rootFolder/')) {
           final data = file.content as List<int>;
           // Remove root folder from path
-          final relativePath = filename.substring(rootFolder.length + 1);
+          final relativePath = normalizedName.substring(rootFolder.length + 1);
+          if (relativePath.isEmpty) continue;
           final filePath = p.join(extractPath, relativePath);
           File(filePath)
             ..createSync(recursive: true)
             ..writeAsBytesSync(data);
         }
       }
+
+      // Delete the ZIP after extraction to save space
+      await File(zipPath).delete();
 
       onProgress(0.7, 'Preparing update...');
       debugPrint('🔧 Preparing update installation...');
@@ -126,8 +203,15 @@ class UpdateService {
         extractPath,
         currentDir,
         p.basename(exePath),
-        tempDir.path,
+        updatesDir.path,
       );
+
+      // Write pending.json so the update survives "Restart Later"
+      final pendingFile = File(p.join(updatesDir.path, 'pending.json'));
+      await pendingFile.writeAsString(jsonEncode({
+        'version': updateInfo.version,
+        'scriptPath': batchScriptPath,
+      }));
 
       onProgress(0.9, 'Update ready!');
       debugPrint('✅ Update staged successfully!');
@@ -143,7 +227,8 @@ class UpdateService {
     }
   }
 
-  /// Create a PowerShell script that will perform the update silently after the app closes.
+  /// Create a CMD batch script that will perform the update after the app closes.
+  /// Uses robocopy for reliable file copying with retry logic.
   /// [scriptDir] should be the temp directory so the script is always writable.
   Future<String> _createUpdateScript(
     String sourcePath,
@@ -151,49 +236,57 @@ class UpdateService {
     String exeName,
     String scriptDir,
   ) async {
-    final scriptPath = p.join(scriptDir, 'update_mymeta.ps1');
+    final scriptPath = p.join(scriptDir, 'update_mymeta.cmd');
+    final logPath = p.join(scriptDir, 'update_mymeta.log');
 
-    // PowerShell single-quoted strings are fully literal — backslash has no special meaning,
-    // so Windows paths can be embedded directly without any escaping.
     final script = '''
-# MyMeta Auto-Update Script (Silent)
-\$ErrorActionPreference = "SilentlyContinue"
+@echo off
+setlocal enabledelayedexpansion
 
-# Wait for MyMeta to close
-\$exeName = '$exeName'
-\$processName = \$exeName -replace '\\.exe\$', ''
+set "LOG=$logPath"
+echo [%date% %time%] === MyMeta Update Started === >> "%LOG%"
 
-Start-Sleep -Seconds 2
+set "EXE=$exeName"
+set "SRC=$sourcePath"
+set "DST=$targetPath"
 
-while (Get-Process -Name \$processName -ErrorAction SilentlyContinue) {
-    Start-Sleep -Seconds 1
-}
+echo [%date% %time%] Source: %SRC% >> "%LOG%"
+echo [%date% %time%] Target: %DST% >> "%LOG%"
+echo [%date% %time%] Waiting for %EXE% to exit... >> "%LOG%"
 
-# Source and target paths
-\$sourcePath = '$sourcePath'
-\$targetPath = '$targetPath'
+timeout /t 2 /nobreak >nul 2>&1
 
-# Perform update (copy files silently)
-try {
-    Copy-Item -Path "\$sourcePath\\\$exeName" -Destination "\$targetPath\\\$exeName" -Force -ErrorAction Stop
-    Copy-Item -Path "\$sourcePath\\*.dll" -Destination "\$targetPath\\" -Force -ErrorAction SilentlyContinue
-    if (Test-Path "\$targetPath\\data") {
-        Remove-Item -Path "\$targetPath\\data" -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    if (Test-Path "\$sourcePath\\data") {
-        Copy-Item -Path "\$sourcePath\\data" -Destination "\$targetPath\\data" -Recurse -Force -ErrorAction SilentlyContinue
-    }
-} catch {}
+:WAIT
+tasklist /fi "imagename eq %EXE%" 2>nul | find /i "%EXE%" >nul 2>&1
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul 2>&1
+    goto WAIT
+)
 
-Start-Sleep -Seconds 1
-Start-Process -FilePath "\$targetPath\\\$exeName" -WorkingDirectory "\$targetPath"
+echo [%date% %time%] Process exited. Copying files... >> "%LOG%"
 
-Start-Sleep -Seconds 2
-Remove-Item -Path \$MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue
+:: Use robocopy to copy all files, excluding UserData (preserves settings and tools)
+robocopy "%SRC%" "%DST%" /E /XD UserData /R:5 /W:2 /NP >> "%LOG%" 2>&1
+set RC=%errorlevel%
+echo [%date% %time%] Robocopy exit code: %RC% >> "%LOG%"
+
+:: robocopy returns 0-7 for various success states, 8+ for errors
+if %RC% GEQ 8 (
+    echo [%date% %time%] ERROR: File copy failed with code %RC% >> "%LOG%"
+    goto END
+)
+
+echo [%date% %time%] Files copied successfully. Restarting app... >> "%LOG%"
+timeout /t 1 /nobreak >nul 2>&1
+start "" "%DST%\\%EXE%"
+
+:END
+echo [%date% %time%] === Update Script Finished === >> "%LOG%"
 ''';
 
     await File(scriptPath).writeAsString(script);
     debugPrint('📜 Update script created at: $scriptPath');
+    debugPrint('📜 Update log will be at: $logPath');
     return scriptPath;
   }
 

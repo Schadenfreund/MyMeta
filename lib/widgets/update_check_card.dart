@@ -17,29 +17,37 @@ class UpdateCheckCard extends StatefulWidget {
 
 class _UpdateCheckCardState extends State<UpdateCheckCard> {
   bool _checking = false;
+  PendingUpdate? _pendingUpdate;
+  final _updateService = UpdateService();
+
+  @override
+  void initState() {
+    super.initState();
+    _checkPendingUpdate();
+  }
+
+  Future<void> _checkPendingUpdate() async {
+    final pending = await _updateService.checkPendingUpdate();
+    if (mounted) {
+      setState(() => _pendingUpdate = pending);
+    }
+  }
 
   Future<void> _checkForUpdates() async {
-    setState(() {
-      _checking = true;
-    });
+    setState(() => _checking = true);
 
-    final updateService = UpdateService();
-    final updateInfo = await updateService.checkForUpdates();
+    final updateInfo = await _updateService.checkForUpdates();
 
-    setState(() {
-      _checking = false;
-    });
+    setState(() => _checking = false);
 
     if (!mounted) return;
 
     if (updateInfo != null) {
-      // Show update available dialog
       _showUpdateDialog(updateInfo);
     } else {
-      // Already latest
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('✅ You are running the latest version'),
+          content: Text('You are running the latest version'),
           duration: Duration(seconds: 2),
         ),
       );
@@ -116,8 +124,45 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _UpdateProgressDialog(updateInfo: updateInfo),
+      builder: (context) => _UpdateProgressDialog(
+        updateInfo: updateInfo,
+        updateService: _updateService,
+        onCompleted: () {
+          // Refresh pending update state when download completes
+          _checkPendingUpdate();
+        },
+      ),
     );
+  }
+
+  Future<void> _restartToUpdate() async {
+    final scriptPath = _updateService.updateScriptPath;
+    if (scriptPath == null) return;
+
+    try {
+      await Process.start(
+        'cmd.exe',
+        ['/c', scriptPath],
+        mode: ProcessStartMode.detached,
+      );
+      exit(0);
+    } catch (e) {
+      debugPrint('Failed to launch update script: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not start installer. Download manually from GitHub.'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _dismissPendingUpdate() async {
+    await _updateService.cleanupPendingUpdate();
+    if (mounted) {
+      setState(() => _pendingUpdate = null);
+    }
   }
 
   @override
@@ -169,25 +214,70 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
           ),
           const SizedBox(height: AppSpacing.lg),
 
-          // Check for Updates Button
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _checking ? null : _checkForUpdates,
-              icon: _checking
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.cloud_download),
-              label: Text(_checking ? 'Checking...' : 'Check for Updates'),
-              style: FilledButton.styleFrom(
-                backgroundColor: settings.accentColor,
-                padding: const EdgeInsets.symmetric(vertical: 14),
+          // Pending update banner
+          if (_pendingUpdate != null) ...[
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: settings.accentColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: settings.accentColor.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.download_done, color: settings.accentColor),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      'v${_pendingUpdate!.version} is ready to install',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: _dismissPendingUpdate,
+                    icon: const Icon(Icons.close, size: 18),
+                    tooltip: 'Dismiss',
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
               ),
             ),
-          ),
+            const SizedBox(height: AppSpacing.md),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _restartToUpdate,
+                icon: const Icon(Icons.restart_alt),
+                label: const Text('Restart Now to Update'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: settings.accentColor,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+          ] else ...[
+            // Check for Updates Button
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _checking ? null : _checkForUpdates,
+                icon: _checking
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.cloud_download),
+                label: Text(_checking ? 'Checking...' : 'Check for Updates'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: settings.accentColor,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+          ],
 
           const SizedBox(height: AppSpacing.sm),
 
@@ -214,8 +304,14 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
 /// Dialog shown during update download and installation
 class _UpdateProgressDialog extends StatefulWidget {
   final UpdateInfo updateInfo;
+  final UpdateService updateService;
+  final VoidCallback onCompleted;
 
-  const _UpdateProgressDialog({required this.updateInfo});
+  const _UpdateProgressDialog({
+    required this.updateInfo,
+    required this.updateService,
+    required this.onCompleted,
+  });
 
   @override
   State<_UpdateProgressDialog> createState() => _UpdateProgressDialogState();
@@ -227,7 +323,6 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
   bool _completed = false;
   bool _error = false;
   String? _launchError;
-  UpdateService? _updateService;
 
   @override
   void initState() {
@@ -236,9 +331,7 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
   }
 
   Future<void> _performUpdate() async {
-    _updateService = UpdateService();
-
-    final success = await _updateService!.downloadAndInstall(
+    final success = await widget.updateService.downloadAndInstall(
       widget.updateInfo,
       (progress, status) {
         if (mounted) {
@@ -255,11 +348,14 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
         _completed = true;
         _error = !success;
       });
+      if (success) {
+        widget.onCompleted();
+      }
     }
   }
 
   Future<void> _executeUpdateAndExit() async {
-    final scriptPath = _updateService?.updateScriptPath;
+    final scriptPath = widget.updateService.updateScriptPath;
     if (scriptPath == null) {
       if (mounted) {
         setState(() => _launchError = 'Update script not found. Please try again.');
@@ -269,13 +365,13 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
 
     try {
       await Process.start(
-        'powershell.exe',
-        ['-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath],
+        'cmd.exe',
+        ['/c', scriptPath],
         mode: ProcessStartMode.detached,
       );
       exit(0);
     } catch (e) {
-      debugPrint('❌ Failed to launch update script: $e');
+      debugPrint('Failed to launch update script: $e');
       if (mounted) {
         setState(() => _launchError = 'Could not start installer. Download manually from GitHub.');
       }
@@ -287,7 +383,7 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
     return AlertDialog(
       title: Text(
         _completed
-            ? (_error ? 'Update Failed' : 'Update Complete')
+            ? (_error ? 'Update Failed' : 'Update Ready')
             : 'Updating MyMeta',
       ),
       content: Column(
@@ -301,7 +397,7 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
             const Icon(Icons.error_outline, color: Colors.red, size: 48),
             const SizedBox(height: 16),
             const Text(
-              'Failed to install update. Please try again or download manually from GitHub.',
+              'Failed to download update. Please try again or download manually from GitHub.',
               textAlign: TextAlign.center,
             ),
           ] else ...[
@@ -312,7 +408,7 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
             ),
             const SizedBox(height: 16),
             const Text(
-              'Update downloaded successfully! Click "Restart Now" to complete the installation.',
+              'Update downloaded successfully!\nRestart now or later from the Settings page.',
               textAlign: TextAlign.center,
             ),
             if (_launchError != null) ...[
