@@ -537,42 +537,32 @@ class _InlineMetadataEditorState extends State<InlineMetadataEditor> {
 
   /// Open cover gallery dialog
   void _openCoverGallery() {
-    if (widget.initialResult.alternativePosterUrls != null &&
-        widget.initialResult.alternativePosterUrls!.isNotEmpty) {
-      showDialog(
-        context: context,
-        builder: (context) => CoverPickerModal(
-          posterUrls: widget.initialResult.alternativePosterUrls!,
-          currentPosterUrl: _posterUrlController.text,
-          onSelected: (url) async {
-            setState(() {
-              _posterUrlController.text = url;
-              _updatedCoverBytes = null;
-            });
-            if (url.startsWith('http')) {
-              try {
-                final response = await http.get(Uri.parse(url));
-                if (response.statusCode == 200 && mounted) {
-                  setState(() => _updatedCoverBytes = response.bodyBytes);
-                  _saveChanges();
-                }
-              } catch (e) {
-                debugPrint("⚠️  Failed to download cover: $e");
+    showDialog(
+      context: context,
+      builder: (context) => CoverPickerModal(
+        posterUrls: widget.initialResult.alternativePosterUrls ?? [],
+        currentPosterUrl: _posterUrlController.text,
+        initialSearchQuery: widget.initialResult.title,
+        isMovie: widget.initialResult.type != 'episode',
+        onSelected: (url) async {
+          setState(() {
+            _posterUrlController.text = url;
+            _updatedCoverBytes = null;
+          });
+          if (url.startsWith('http')) {
+            try {
+              final response = await http.get(Uri.parse(url));
+              if (response.statusCode == 200 && mounted) {
+                setState(() => _updatedCoverBytes = response.bodyBytes);
+                _saveChanges();
               }
+            } catch (e) {
+              debugPrint("⚠️  Failed to download cover: $e");
             }
-          },
-        ),
-      );
-    } else {
-      // No alternative covers available
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'No alternative covers available. Try searching online first.'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
+          }
+        },
+      ),
+    );
   }
 
   /// Open search results dialog

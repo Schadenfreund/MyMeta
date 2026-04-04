@@ -60,18 +60,22 @@ class ImageUtils {
     }
   }
 
-  /// Get FFmpeg path from system or bundled location
+  /// Get FFmpeg path from UserData/tools, bundled location, or system PATH
   /// Returns null if FFmpeg is not available
   static String? _getFFmpegPath() {
     try {
-      // Check bundled FFmpeg first (app directory)
       final exePath = Platform.resolvedExecutable;
       final exeDir = p.dirname(exePath);
-      final bundledFfmpeg = p.join(exeDir, 'ffmpeg.exe');
 
-      if (File(bundledFfmpeg).existsSync()) {
-        return bundledFfmpeg;
+      // Check UserData/tools/ffmpeg (portable location)
+      for (final sub in ['bin/ffmpeg.exe', 'ffmpeg.exe']) {
+        final toolPath = p.join(exeDir, 'UserData', 'tools', 'ffmpeg', sub);
+        if (File(toolPath).existsSync()) return toolPath;
       }
+
+      // Check bundled FFmpeg (app directory)
+      final bundledFfmpeg = p.join(exeDir, 'ffmpeg.exe');
+      if (File(bundledFfmpeg).existsSync()) return bundledFfmpeg;
 
       // Check PATH
       final pathResult = Process.runSync('where', ['ffmpeg.exe']);

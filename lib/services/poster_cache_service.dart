@@ -72,7 +72,7 @@ class PosterCacheService {
         return null;
       }
 
-      // Resize with FFmpeg
+      // Try resizing with FFmpeg for smaller file sizes
       debugPrint('⏳ PosterCache: Resizing poster to 512px...');
       final resizeSuccess = await ImageUtils.resizePosterWithFFmpeg(
         tempFile.path,
@@ -83,10 +83,16 @@ class PosterCacheService {
       if (resizeSuccess && File(cachePath).existsSync()) {
         debugPrint('✅ PosterCache: Cached resized poster');
         return cachePath;
-      } else {
-        debugPrint('❌ PosterCache: Resize failed');
-        return null;
       }
+
+      // Resize failed (FFmpeg unavailable?) — cache the original download as-is
+      debugPrint('⚠️  PosterCache: Resize unavailable, caching original poster');
+      tempFile.copySync(cachePath);
+      if (File(cachePath).existsSync() &&
+          File(cachePath).lengthSync() >= _minCacheFileSize) {
+        return cachePath;
+      }
+      return null;
     } catch (e) {
       debugPrint('❌ PosterCache: Exception during download/resize: $e');
       return null;

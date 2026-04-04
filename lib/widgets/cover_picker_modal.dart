@@ -4,116 +4,233 @@ import 'package:provider/provider.dart';
 import '../backend/match_result.dart';
 import '../backend/core_backend.dart';
 import '../services/settings_service.dart';
+import '../services/tmdb_service.dart';
 
-/// Modal for selecting alternative cover art from the same search result
-class CoverPickerModal extends StatelessWidget {
+/// Modal for selecting alternative cover art with search capability
+class CoverPickerModal extends StatefulWidget {
   final List<String> posterUrls;
   final String? currentPosterUrl;
   final Function(String) onSelected;
+  final String? initialSearchQuery;
+  final bool isMovie;
 
   const CoverPickerModal({
     super.key,
     required this.posterUrls,
     this.currentPosterUrl,
     required this.onSelected,
+    this.initialSearchQuery,
+    this.isMovie = true,
   });
 
   @override
+  State<CoverPickerModal> createState() => _CoverPickerModalState();
+}
+
+class _CoverPickerModalState extends State<CoverPickerModal> {
+  late TextEditingController _searchController;
+  late List<String> _currentPosters;
+  bool _isSearching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController =
+        TextEditingController(text: widget.initialSearchQuery ?? '');
+    _currentPosters = List.from(widget.posterUrls);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _searchPosters() async {
+    final query = _searchController.text.trim();
+    if (query.isEmpty) return;
+
+    final settings = context.read<SettingsService>();
+    if (settings.tmdbApiKey.isEmpty) return;
+
+    setState(() => _isSearching = true);
+
+    try {
+      final tmdb = TmdbService(settings.tmdbApiKey);
+      List<String> posters = [];
+
+      if (widget.isMovie) {
+        final result = await tmdb.searchMovie(query, null);
+        if (result != null) {
+          posters = await tmdb.getMoviePosters(result['id'] as int);
+        }
+      } else {
+        final result = await tmdb.searchTV(query);
+        if (result != null) {
+          posters = await tmdb.getTVPosters(result['id'] as int);
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _currentPosters = posters;
+          _isSearching = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Cover search failed: $e');
+      if (mounted) setState(() => _isSearching = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 600, maxHeight: 500),
+        constraints: const BoxConstraints(maxWidth: 600, maxHeight: 560),
         child: Column(
           children: [
             // Header
             Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: Column(
                 children: [
-                  const Text(
-                    'Select Cover Art',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  Row(
+                    children: [
+                      Icon(Icons.photo_library,
+                          color: settings.accentColor, size: 24),
+                      const SizedBox(width: 10),
+                      const Text(
+                        'Select Cover Art',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
                   ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
+                  const SizedBox(height: 12),
+                  // Search bar
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _searchController,
+                          decoration: InputDecoration(
+                            hintText: 'Search posters by title...',
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(
+                                  color: settings.accentColor, width: 1.5),
+                            ),
+                          ),
+                          onSubmitted: (_) => _searchPosters(),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      ElevatedButton.icon(
+                        onPressed: _isSearching ? null : _searchPosters,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: settings.accentColor,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                        ),
+                        icon: const Icon(Icons.search, size: 18),
+                        label: const Text('Search'),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            const Divider(height: 1),
-            // Grid of posters
+            const SizedBox(height: 4),
+            // Grid of posters or loading
             Expanded(
-              child: GridView.builder(
-                padding: const EdgeInsets.all(16),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 2 / 3,
-                ),
-                itemCount: posterUrls.length,
-                itemBuilder: (context, index) {
-                  final posterUrl = posterUrls[index];
-                  final isSelected = posterUrl == currentPosterUrl;
+              child: _isSearching
+                  ? Center(
+                      child: CircularProgressIndicator(
+                          color: settings.accentColor))
+                  : _currentPosters.isEmpty
+                      ? const Center(child: Text('No posters found'))
+                      : GridView.builder(
+                          padding: const EdgeInsets.all(16),
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 3,
+                            crossAxisSpacing: 12,
+                            mainAxisSpacing: 12,
+                            childAspectRatio: 2 / 3,
+                          ),
+                          itemCount: _currentPosters.length,
+                          itemBuilder: (context, index) {
+                            final posterUrl = _currentPosters[index];
+                            final isSelected =
+                                posterUrl == widget.currentPosterUrl;
 
-                  return GestureDetector(
-                    onTap: () {
-                      onSelected(posterUrl);
-                      Navigator.pop(context);
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: isSelected
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.transparent,
-                          width: isSelected ? 3 : 1,
-                        ),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            Image.network(
-                              posterUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  color: Colors.grey[300],
-                                  child: const Icon(
-                                    Icons.broken_image,
-                                    color: Colors.grey,
-                                  ),
-                                );
+                            return GestureDetector(
+                              onTap: () {
+                                widget.onSelected(posterUrl);
+                                Navigator.pop(context);
                               },
-                            ),
-                            if (isSelected)
-                              Container(
-                                color: Colors.black.withValues(alpha: 0.3),
-                                child: Center(
-                                  child: Icon(
-                                    Icons.check_circle,
-                                    size: 40,
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: isSelected
+                                        ? settings.accentColor
+                                        : Colors.transparent,
+                                    width: isSelected ? 3 : 1,
+                                  ),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Image.network(
+                                        posterUrl,
+                                        fit: BoxFit.cover,
+                                        errorBuilder:
+                                            (context, error, stackTrace) {
+                                          return Container(
+                                            color: Colors.grey[300],
+                                            child: const Icon(
+                                                Icons.broken_image,
+                                                color: Colors.grey),
+                                          );
+                                        },
+                                      ),
+                                      if (isSelected)
+                                        Container(
+                                          color:
+                                              Colors.black.withValues(alpha: 0.3),
+                                          child: Center(
+                                            child: Icon(
+                                              Icons.check_circle,
+                                              size: 40,
+                                              color: settings.accentColor,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                 ),
                               ),
-                          ],
+                            );
+                          },
                         ),
-                      ),
-                    ),
-                  );
-                },
-              ),
             ),
           ],
         ),
@@ -122,7 +239,7 @@ class CoverPickerModal extends StatelessWidget {
   }
 }
 
-/// Modal for selecting from search results (re-matching)
+/// Modal for selecting from search results (re-matching) with search bar
 class SearchResultsPickerModal extends StatefulWidget {
   final List<MatchResult> searchResults;
   final MatchResult? currentResult;
@@ -141,7 +258,8 @@ class SearchResultsPickerModal extends StatefulWidget {
 }
 
 class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
-  String _selectedSource = 'tmdb'; // 'tmdb' or 'omdb'
+  late TextEditingController _searchController;
+  String _selectedSource = 'tmdb';
   List<MatchResult> _currentResults = [];
   bool _isSearching = false;
   String? _errorMessage;
@@ -149,75 +267,78 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
   @override
   void initState() {
     super.initState();
+    _searchController =
+        TextEditingController(text: widget.currentResult?.title ?? '');
     _currentResults = widget.searchResults;
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _initSource();
+  }
 
-    // Only run once
-    if (_selectedSource == 'tmdb') {
-      // Auto-select first available configured source
-      final settings = context.read<SettingsService>();
-      final hasTmdb = settings.tmdbApiKey.isNotEmpty;
-      final hasOmdb = settings.omdbApiKey.isNotEmpty;
-      final hasAnidb = settings.anidbClientId.isNotEmpty;
+  void _initSource() {
+    final settings = context.read<SettingsService>();
+    final hasTmdb = settings.tmdbApiKey.isNotEmpty;
+    final hasOmdb = settings.omdbApiKey.isNotEmpty;
+    final hasAnidb = settings.anidbClientId.isNotEmpty;
 
-      // Try to detect source from existing results
-      if (_currentResults.isNotEmpty) {
-        if (_currentResults.first.imdbId != null &&
-            _currentResults.first.tmdbId == null &&
-            hasOmdb) {
-          _selectedSource = 'omdb';
-        } else if (_currentResults.first.tmdbId != null && hasTmdb) {
-          _selectedSource = 'tmdb';
-        } else if (hasAnidb) {
-          _selectedSource = 'anidb';
-        }
-      } else {
-        // No results yet, pick first available source
-        if (hasTmdb) {
-          _selectedSource = 'tmdb';
-        } else if (hasOmdb) {
-          _selectedSource = 'omdb';
-        } else if (hasAnidb) {
-          _selectedSource = 'anidb';
-        }
+    // Detect source from existing results
+    if (_currentResults.isNotEmpty) {
+      if (_currentResults.first.imdbId != null &&
+          _currentResults.first.tmdbId == null &&
+          hasOmdb) {
+        _selectedSource = 'omdb';
+      } else if (_currentResults.first.tmdbId != null && hasTmdb) {
+        _selectedSource = 'tmdb';
+      } else if (hasAnidb) {
+        _selectedSource = 'anidb';
+      }
+    } else {
+      if (hasTmdb) {
+        _selectedSource = 'tmdb';
+      } else if (hasOmdb) {
+        _selectedSource = 'omdb';
+      } else if (hasAnidb) {
+        _selectedSource = 'anidb';
+      }
 
-        // Automatically search if no results provided
-        if (_currentResults.isEmpty) {
-          // Defer search to next frame to avoid setState during build
-          SchedulerBinding.instance.addPostFrameCallback((_) {
-            _performSearch();
-          });
-        }
+      // Auto-search if no initial results
+      if (_currentResults.isEmpty) {
+        SchedulerBinding.instance.addPostFrameCallback((_) => _performSearch());
       }
     }
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _performSearch() async {
-    if (widget.currentResult == null || widget.currentResult!.title == null) {
-      setState(() {
-        _errorMessage = 'No title to search for';
-      });
+    final query = _searchController.text.trim();
+    if (query.isEmpty) {
+      setState(() => _errorMessage = 'Enter a title to search');
       return;
     }
 
     final settings = context.read<SettingsService>();
-    final title = widget.currentResult!.title!;
-    final year = widget.currentResult!.year;
-    final isMovie = widget.currentResult!.type == 'movie';
+    final isMovie = widget.currentResult?.type == 'movie';
 
-    // Get API key for selected source (already validated by dropdown)
     String apiKey;
     if (_selectedSource == 'tmdb') {
       apiKey = settings.tmdbApiKey;
     } else if (_selectedSource == 'omdb') {
       apiKey = settings.omdbApiKey;
     } else {
-      // anidb
       apiKey = settings.anidbClientId;
+    }
+
+    if (apiKey.isEmpty) {
+      setState(() => _errorMessage = 'No API key for $_selectedSource');
+      return;
     }
 
     setState(() {
@@ -225,31 +346,22 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
       _errorMessage = null;
     });
 
-    debugPrint('🔍 Modal calling centralized search:');
-    debugPrint('   Title: $title');
-    debugPrint('   Year: $year');
-    debugPrint('   IsMovie: $isMovie');
-    debugPrint('   Source: $_selectedSource');
-    debugPrint('   Season: ${widget.currentResult!.season}');
-    debugPrint('   Episode: ${widget.currentResult!.episode}');
-    debugPrint('   EpisodeTitle: ${widget.currentResult!.episodeTitle}');
-
     try {
-      // Use the centralized search method
       final results = await CoreBackend.searchMetadata(
-        title: title,
-        year: year,
+        title: query,
+        year: null,
         isMovie: isMovie,
         source: _selectedSource,
         apiKey: apiKey,
-        season: widget.currentResult!.season,
-        episode: widget.currentResult!.episode,
-        episodeTitle: widget.currentResult!.episodeTitle,
+        season: widget.currentResult?.season,
+        episode: widget.currentResult?.episode,
+        episodeTitle: widget.currentResult?.episodeTitle,
       );
 
       setState(() {
         _currentResults = results;
         _isSearching = false;
+        if (results.isEmpty) _errorMessage = 'No results found for "$query"';
       });
     } catch (e) {
       setState(() {
@@ -261,25 +373,28 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 600, maxHeight: 600),
+        constraints: const BoxConstraints(maxWidth: 700, maxHeight: 600),
         child: Column(
           children: [
-            // Header with toggle
+            // Header
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
               child: Column(
                 children: [
                   Row(
                     children: [
+                      Icon(Icons.search,
+                          color: settings.accentColor, size: 24),
+                      const SizedBox(width: 10),
                       const Text(
                         'Select Match',
                         style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                            fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                       const Spacer(),
                       IconButton(
@@ -289,127 +404,85 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  // Source Toggle
+                  // Search bar with source dropdown
                   Row(
                     children: [
-                      const Text(
-                        'Search with:',
-                        style: TextStyle(fontSize: 14),
+                      // Source dropdown (compact)
+                      Consumer<SettingsService>(
+                        builder: (context, settings, _) {
+                          final items = <DropdownMenuItem<String>>[];
+                          if (settings.tmdbApiKey.isNotEmpty) {
+                            items.add(const DropdownMenuItem(
+                                value: 'tmdb', child: Text('TMDB')));
+                          }
+                          if (settings.omdbApiKey.isNotEmpty) {
+                            items.add(const DropdownMenuItem(
+                                value: 'omdb', child: Text('OMDb')));
+                          }
+                          if (settings.anidbClientId.isNotEmpty) {
+                            items.add(const DropdownMenuItem(
+                                value: 'anidb', child: Text('AniDB')));
+                          }
+                          if (items.isEmpty) {
+                            return const SizedBox.shrink();
+                          }
+                          return Container(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: DropdownButton<String>(
+                              value: _selectedSource,
+                              underline: const SizedBox(),
+                              icon: const Icon(Icons.arrow_drop_down,
+                                  size: 20),
+                              items: items,
+                              onChanged: (v) {
+                                if (v != null && v != _selectedSource) {
+                                  setState(() => _selectedSource = v);
+                                  _performSearch();
+                                }
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 10),
+                      // Search text field
+                      Expanded(
+                        child: TextField(
+                          controller: _searchController,
+                          decoration: InputDecoration(
+                            hintText: 'Search title...',
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(
+                                  color: settings.accentColor, width: 1.5),
+                            ),
+                          ),
+                          onSubmitted: (_) => _performSearch(),
+                        ),
                       ),
                       const SizedBox(width: 12),
-                      Expanded(
-                        child: Consumer<SettingsService>(
-                          builder: (context, settings, _) {
-                            // Build dropdown items only for configured sources
-                            final List<DropdownMenuItem<String>>
-                                availableItems = [];
-
-                            if (settings.tmdbApiKey.isNotEmpty) {
-                              availableItems.add(
-                                const DropdownMenuItem(
-                                  value: 'tmdb',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.movie_outlined, size: 18),
-                                      SizedBox(width: 8),
-                                      Text('TMDB'),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }
-
-                            if (settings.omdbApiKey.isNotEmpty) {
-                              availableItems.add(
-                                const DropdownMenuItem(
-                                  value: 'omdb',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.local_movies_outlined,
-                                          size: 18),
-                                      SizedBox(width: 8),
-                                      Text('OMDb'),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }
-
-                            if (settings.anidbClientId.isNotEmpty) {
-                              availableItems.add(
-                                const DropdownMenuItem(
-                                  value: 'anidb',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.theaters_outlined, size: 18),
-                                      SizedBox(width: 8),
-                                      Text('AniDB'),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }
-
-                            // If no sources configured, show disabled message
-                            if (availableItems.isEmpty) {
-                              return Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.orange),
-                                ),
-                                child: const Row(
-                                  children: [
-                                    Icon(Icons.warning_amber,
-                                        color: Colors.orange, size: 18),
-                                    SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        'No API keys configured',
-                                        style: TextStyle(
-                                            color: Colors.orange, fontSize: 12),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }
-
-                            return Container(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 12),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceVariant,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .outline
-                                      .withOpacity(0.2),
-                                ),
-                              ),
-                              child: DropdownButton<String>(
-                                value: _selectedSource,
-                                isExpanded: true,
-                                underline: const SizedBox(),
-                                icon: const Icon(Icons.arrow_drop_down),
-                                items: availableItems,
-                                onChanged: (String? newSource) {
-                                  if (newSource != null &&
-                                      newSource != _selectedSource) {
-                                    setState(() {
-                                      _selectedSource = newSource;
-                                    });
-                                    _performSearch();
-                                  }
-                                },
-                              ),
-                            );
-                          },
+                      ElevatedButton.icon(
+                        onPressed: _isSearching ? null : _performSearch,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: settings.accentColor,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
                         ),
+                        icon: const Icon(Icons.search, size: 18),
+                        label: const Text('Search'),
                       ),
                     ],
                   ),
@@ -440,111 +513,97 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
                 ],
               ),
             ),
-            const Divider(height: 1),
-            // List of search results or loading
+            const SizedBox(height: 4),
+            // Results list or loading
             Expanded(
               child: _isSearching
-                  ? const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircularProgressIndicator(),
-                          SizedBox(height: 16),
-                          Text('Searching...'),
-                        ],
-                      ),
-                    )
+                  ? Center(
+                      child: CircularProgressIndicator(
+                          color: settings.accentColor))
                   : _currentResults.isEmpty
-                      ? const Center(
-                          child: Text('No results found'),
-                        )
-                      : ListView.builder(
+                      ? const Center(child: Text('No results found'))
+                      : ListView.separated(
                           padding: const EdgeInsets.all(12),
                           itemCount: _currentResults.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 4),
                           itemBuilder: (context, index) {
                             final result = _currentResults[index];
+                            final isSelected =
+                                widget.currentResult != null &&
+                                    ((result.tmdbId != null &&
+                                            result.tmdbId ==
+                                                widget.currentResult
+                                                    ?.tmdbId) ||
+                                        (result.imdbId != null &&
+                                            result.imdbId ==
+                                                widget.currentResult
+                                                    ?.imdbId) ||
+                                        (result.tmdbId == null &&
+                                            result.imdbId == null &&
+                                            result.title ==
+                                                widget.currentResult
+                                                    ?.title &&
+                                            result.year ==
+                                                widget.currentResult
+                                                    ?.year));
 
-                            // Better selection logic - compare by unique IDs or title+year
-                            final isSelected = widget.currentResult != null &&
-                                ((result.tmdbId != null &&
-                                        result.tmdbId ==
-                                            widget.currentResult?.tmdbId) ||
-                                    (result.imdbId != null &&
-                                        result.imdbId ==
-                                            widget.currentResult?.imdbId) ||
-                                    (result.tmdbId == null &&
-                                        result.imdbId == null &&
-                                        result.title ==
-                                            widget.currentResult?.title &&
-                                        result.year ==
-                                            widget.currentResult?.year));
+                            final subtitle = [
+                              result.type == 'episode'
+                                  ? 'TV Show'
+                                  : 'Movie',
+                              if (result.year != null) '${result.year}',
+                              if (result.rating != null)
+                                '\u2605 ${result.rating!.toStringAsFixed(1)}',
+                              if (result.genres != null &&
+                                  result.genres!.isNotEmpty)
+                                result.genres!.take(2).join(', '),
+                            ].join(' \u2022 ');
 
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              color: isSelected
-                                  ? Theme.of(context)
-                                      .colorScheme
-                                      .primary
-                                      .withValues(alpha: 0.1)
-                                  : null,
-                              child: ListTile(
-                                leading: result.posterUrl != null &&
-                                        result.posterUrl!.startsWith('http')
-                                    ? ClipRRect(
-                                        borderRadius: BorderRadius.circular(4),
-                                        child: Image.network(
-                                          result.posterUrl!,
+                            return ListTile(
+                              leading: ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: result.posterUrl != null &&
+                                        result.posterUrl!
+                                            .startsWith('http')
+                                    ? Image.network(
+                                        result.posterUrl!,
+                                        width: 40,
+                                        height: 56,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) =>
+                                            const SizedBox(
                                           width: 40,
-                                          height: 60,
-                                          fit: BoxFit.cover,
-                                          errorBuilder:
-                                              (context, error, stackTrace) {
-                                            return Container(
-                                              width: 40,
-                                              height: 60,
-                                              color: Colors.grey[300],
-                                              child: const Icon(
-                                                Icons.broken_image,
-                                                size: 16,
-                                              ),
-                                            );
-                                          },
+                                          height: 56,
+                                          child: Icon(Icons.movie),
                                         ),
                                       )
-                                    : Container(
+                                    : const SizedBox(
                                         width: 40,
-                                        height: 60,
-                                        color: Colors.grey[300],
-                                        child: const Icon(
-                                            Icons.image_not_supported),
+                                        height: 56,
+                                        child: Icon(Icons.movie),
                                       ),
-                                title: Text(
-                                  result.title ?? 'Unknown',
-                                  style: TextStyle(
-                                    fontWeight:
-                                        isSelected ? FontWeight.bold : null,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  _buildSubtitle(result),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                trailing: isSelected
-                                    ? Icon(
-                                        Icons.check_circle,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                      )
-                                    : const Icon(Icons.chevron_right),
-                                onTap: () {
-                                  debugPrint(
-                                      '📌 User selected result: ${result.title}');
-                                  widget.onSelected(result);
-                                  Navigator.pop(context);
-                                },
                               ),
+                              title: Text(
+                                result.title ?? 'Unknown',
+                                style: TextStyle(
+                                  fontWeight:
+                                      isSelected ? FontWeight.bold : null,
+                                ),
+                              ),
+                              subtitle: Text(
+                                subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: isSelected
+                                  ? Icon(Icons.check_circle,
+                                      color: settings.accentColor)
+                                  : const Icon(Icons.chevron_right),
+                              onTap: () {
+                                widget.onSelected(result);
+                                Navigator.pop(context);
+                              },
                             );
                           },
                         ),
@@ -553,28 +612,5 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
         ),
       ),
     );
-  }
-
-  String _buildSubtitle(MatchResult result) {
-    List<String> parts = [];
-
-    if (result.type == 'episode') {
-      parts.add('TV Show');
-      if (result.season != null && result.episode != null) {
-        parts.add('S${result.season}E${result.episode}');
-      }
-    } else {
-      parts.add('Movie');
-    }
-
-    if (result.year != null) {
-      parts.add('${result.year}');
-    }
-
-    if (result.rating != null) {
-      parts.add('⭐ ${result.rating!.toStringAsFixed(1)}');
-    }
-
-    return parts.join(' • ');
   }
 }
