@@ -13,45 +13,82 @@ class PendingUpdate {
   PendingUpdate({required this.version, required this.scriptPath});
 }
 
-/// Service for checking and installing updates from GitHub Releases
+/// Information about an available update
+class UpdateInfo {
+  final String version;
+  final String downloadUrl;
+  final String releaseNotes;
+  final DateTime publishedAt;
+
+  UpdateInfo({
+    required this.version,
+    required this.downloadUrl,
+    required this.releaseNotes,
+    required this.publishedAt,
+  });
+}
+
+/// Service for checking and installing updates from GitHub Releases.
+///
+/// Update flow:
+///   1. [checkForUpdates] — queries GitHub API for a newer release
+///   2. [downloadAndInstall] — downloads ZIP, extracts to UserData/Updates/, writes pending.json
+///   3. [launchUpdateScript] — starts hidden PowerShell process, caller then calls exit(0)
+///   4. PowerShell script waits for app to close, robocopy files (excluding UserData), restarts app
+///   5. On next launch [checkPendingUpdate] detects version match → [cleanupPendingUpdate]
 class UpdateService {
   static const String repoOwner = 'Schadenfreund';
   static const String repoName = 'MyMeta';
+  static const int _processWaitTimeoutSeconds = 60;
+
+  static String get releasesUrl =>
+      'https://github.com/$repoOwner/$repoName/releases';
+  static String get latestReleaseUrl => '$releasesUrl/latest';
 
   String? _updateScriptPath;
 
   /// Get the path to the update script (if update was downloaded)
   String? get updateScriptPath => _updateScriptPath;
 
-  /// Get the updates directory path (AppDir/UserData/Updates/)
+  // ---------------------------------------------------------------------------
+  // Paths
+  // ---------------------------------------------------------------------------
+
+  /// AppDir/UserData/Updates/
   static String getUpdatesDir() {
     final exeDir = p.dirname(Platform.resolvedExecutable);
     return p.join(exeDir, 'UserData', 'Updates');
   }
 
+  // ---------------------------------------------------------------------------
+  // Pending update lifecycle
+  // ---------------------------------------------------------------------------
+
   /// Check if there's a pending update ready to install.
-  /// Returns null if no valid pending update exists.
-  /// Automatically cleans up if the update was already applied.
+  /// Automatically cleans up stale/completed updates.
   Future<PendingUpdate?> checkPendingUpdate() async {
     try {
-      final updatesDir = getUpdatesDir();
-      final pendingFile = File(p.join(updatesDir, 'pending.json'));
+      final pendingFile = File(p.join(getUpdatesDir(), 'pending.json'));
       if (!pendingFile.existsSync()) return null;
 
-      final content = await pendingFile.readAsString();
-      final data = jsonDecode(content) as Map<String, dynamic>;
-      final version = data['version'] as String;
-      final scriptPath = data['scriptPath'] as String;
+      final data = jsonDecode(await pendingFile.readAsString());
+      final version = data['version'] as String?;
+      final scriptPath = data['scriptPath'] as String?;
 
-      // Check if we're already on this version (update already completed)
-      final packageInfo = await PackageInfo.fromPlatform();
-      if (!_isNewerVersion(packageInfo.version, version)) {
+      if (version == null || scriptPath == null) {
+        debugPrint('⚠️ Invalid pending.json, cleaning up');
+        await cleanupPendingUpdate();
+        return null;
+      }
+
+      // Already on this version → update succeeded
+      final current = (await PackageInfo.fromPlatform()).version;
+      if (!_isNewerVersion(current, version)) {
         debugPrint('✅ Pending update v$version already applied, cleaning up');
         await cleanupPendingUpdate();
         return null;
       }
 
-      // Check if the script still exists
       if (!File(scriptPath).existsSync()) {
         debugPrint('⚠️ Pending update script missing, cleaning up');
         await cleanupPendingUpdate();
@@ -67,12 +104,12 @@ class UpdateService {
     }
   }
 
-  /// Clean up the updates directory
+  /// Remove the entire UserData/Updates/ directory.
   Future<void> cleanupPendingUpdate() async {
     try {
-      final updatesDir = Directory(getUpdatesDir());
-      if (await updatesDir.exists()) {
-        await updatesDir.delete(recursive: true);
+      final dir = Directory(getUpdatesDir());
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
         debugPrint('🧹 Cleaned up updates directory');
       }
     } catch (e) {
@@ -80,146 +117,107 @@ class UpdateService {
     }
   }
 
-  /// Check if a newer version is available on GitHub
+  // ---------------------------------------------------------------------------
+  // Check for updates
+  // ---------------------------------------------------------------------------
+
+  /// Query GitHub API for a newer release. Returns null if up-to-date.
   Future<UpdateInfo?> checkForUpdates() async {
     try {
-      final packageInfo = await PackageInfo.fromPlatform();
-      final currentVersion = packageInfo.version;
+      final current = (await PackageInfo.fromPlatform()).version;
+      debugPrint('🔍 Checking for updates (current: v$current)');
 
-      debugPrint('🔍 Checking for updates (current: v$currentVersion)');
-
-      // Fetch latest release from GitHub API
-      final dio = _createDio();
-      final response = await dio.get(
+      final response = await _createDio().get(
         'https://api.github.com/repos/$repoOwner/$repoName/releases/latest',
       );
 
-      if (response.statusCode == 200) {
-        final data = response.data;
-        final latestVersion = (data['tag_name'] as String).replaceFirst(
-          'v',
-          '',
-        );
+      if (response.statusCode != 200) return null;
 
-        debugPrint('📦 Latest version on GitHub: v$latestVersion');
+      final data = response.data;
+      final latest =
+          (data['tag_name'] as String).replaceFirst('v', '');
 
-        if (_isNewerVersion(currentVersion, latestVersion)) {
-          debugPrint('✨ Update available: v$currentVersion → v$latestVersion');
+      debugPrint('📦 Latest version on GitHub: v$latest');
 
-          return UpdateInfo(
-            version: latestVersion,
-            downloadUrl: _getWindowsAssetUrl(data['assets']),
-            releaseNotes: data['body'] ?? 'No release notes available',
-            publishedAt: DateTime.parse(data['published_at']),
-          );
-        } else {
-          debugPrint('✅ Already running latest version');
-        }
+      if (!_isNewerVersion(current, latest)) {
+        debugPrint('✅ Already running latest version');
+        return null;
       }
+
+      debugPrint('✨ Update available: v$current → v$latest');
+      return UpdateInfo(
+        version: latest,
+        downloadUrl: _getWindowsAssetUrl(data['assets']),
+        releaseNotes: data['body'] ?? 'No release notes available',
+        publishedAt: DateTime.parse(data['published_at']),
+      );
     } catch (e) {
       debugPrint('❌ Error checking for updates: $e');
+      return null;
     }
-    return null;
   }
 
-  /// Download and install update into AppDir/UserData/Updates/.
-  /// The update persists so the user can restart later.
-  /// Returns true if successful, false otherwise.
+  // ---------------------------------------------------------------------------
+  // Download & stage
+  // ---------------------------------------------------------------------------
+
+  /// Download release ZIP, extract to UserData/Updates/, write pending.json.
+  /// Returns true on success.
   Future<bool> downloadAndInstall(
     UpdateInfo updateInfo,
-    Function(double progress, String status) onProgress,
+    void Function(double progress, String status) onProgress,
   ) async {
     try {
       onProgress(0.0, 'Preparing download...');
 
-      // Use AppDir/UserData/Updates/ so the download persists across sessions
       final updatesDir = Directory(getUpdatesDir());
-      if (await updatesDir.exists()) {
-        await updatesDir.delete(recursive: true);
-      }
+      if (await updatesDir.exists()) await updatesDir.delete(recursive: true);
       await updatesDir.create(recursive: true);
 
-      final dio = _createDio(receiveTimeout: const Duration(minutes: 5));
+      // Download
       final zipPath = p.join(updatesDir.path, 'update.zip');
-
       debugPrint('📥 Downloading update from: ${updateInfo.downloadUrl}');
 
-      // Download with progress
-      await dio.download(
+      await _createDio(receiveTimeout: const Duration(minutes: 5)).download(
         updateInfo.downloadUrl,
         zipPath,
         onReceiveProgress: (received, total) {
-          if (total != -1) {
-            final progress = received / total;
+          if (total > 0) {
             onProgress(
-              progress * 0.5,
-              'Downloading... ${(progress * 100).toStringAsFixed(0)}%',
+              (received / total) * 0.5,
+              'Downloading... ${((received / total) * 100).toStringAsFixed(0)}%',
             );
           }
         },
       );
 
+      // Extract
       onProgress(0.5, 'Extracting files...');
-      debugPrint('📦 Extracting update...');
-
-      // Extract ZIP
-      final bytes = await File(zipPath).readAsBytes();
-      final archive = ZipDecoder().decodeBytes(bytes);
-
-      // Find the root folder in the archive (e.g., MyMeta-v1.0.1-windows/)
-      // Normalize path separators — Compress-Archive on Windows may use backslashes
-      final firstEntry = archive.first.name.replaceAll('\\', '/');
-      final rootFolder = firstEntry.split('/').first;
       final extractPath = p.join(updatesDir.path, 'extracted');
+      await _extractZip(zipPath, extractPath);
+      await File(zipPath).delete(); // save space
 
-      // Extract all files
-      for (final file in archive) {
-        final normalizedName = file.name.replaceAll('\\', '/');
-        if (file.isFile && normalizedName.startsWith('$rootFolder/')) {
-          final data = file.content as List<int>;
-          // Remove root folder from path
-          final relativePath = normalizedName.substring(rootFolder.length + 1);
-          if (relativePath.isEmpty) continue;
-          final filePath = p.join(extractPath, relativePath);
-          File(filePath)
-            ..createSync(recursive: true)
-            ..writeAsBytesSync(data);
-        }
-      }
-
-      // Delete the ZIP after extraction to save space
-      await File(zipPath).delete();
-
+      // Create update script
       onProgress(0.7, 'Preparing update...');
-      debugPrint('🔧 Preparing update installation...');
-
-      // Get current app directory from executable path (works for portable apps)
       final exePath = Platform.resolvedExecutable;
-      final currentDir = p.dirname(exePath);
-      debugPrint('📁 App directory: $currentDir');
+      final appDir = p.dirname(exePath);
+      debugPrint('📁 App directory: $appDir');
 
-      // Create update batch script
-      final batchScriptPath = await _createUpdateScript(
-        extractPath,
-        currentDir,
-        p.basename(exePath),
-        updatesDir.path,
+      final scriptPath = await _createUpdateScript(
+        sourcePath: extractPath,
+        targetPath: appDir,
+        exeName: p.basename(exePath),
+        scriptDir: updatesDir.path,
       );
 
-      // Write pending.json so the update survives "Restart Later"
-      final pendingFile = File(p.join(updatesDir.path, 'pending.json'));
-      await pendingFile.writeAsString(jsonEncode({
-        'version': updateInfo.version,
-        'scriptPath': batchScriptPath,
-      }));
+      // Persist for "Restart Later"
+      await File(p.join(updatesDir.path, 'pending.json')).writeAsString(
+        jsonEncode({'version': updateInfo.version, 'scriptPath': scriptPath}),
+      );
 
+      _updateScriptPath = scriptPath;
       onProgress(0.9, 'Update ready!');
-      debugPrint('✅ Update staged successfully!');
-      debugPrint('📜 Update script: $batchScriptPath');
-
-      // Store the script path for the UI to execute after user confirmation
-      _updateScriptPath = batchScriptPath;
-
+      debugPrint('✅ Update staged: $scriptPath');
       return true;
     } catch (e) {
       debugPrint('❌ Error installing update: $e');
@@ -227,142 +225,174 @@ class UpdateService {
     }
   }
 
-  /// Create a CMD batch script that will perform the update after the app closes.
-  /// Uses robocopy for reliable file copying with retry logic.
-  /// [scriptDir] should be the temp directory so the script is always writable.
-  Future<String> _createUpdateScript(
-    String sourcePath,
-    String targetPath,
-    String exeName,
-    String scriptDir,
-  ) async {
-    final scriptPath = p.join(scriptDir, 'update_mymeta.cmd');
+  // ---------------------------------------------------------------------------
+  // Launch
+  // ---------------------------------------------------------------------------
+
+  /// Start the update script in a hidden PowerShell process.
+  /// Returns null on success, or an error message on failure.
+  /// The caller is responsible for calling exit(0) after a successful launch.
+  Future<String?> launchUpdateScript() async {
+    final scriptPath = _updateScriptPath;
+    if (scriptPath == null || !File(scriptPath).existsSync()) {
+      return 'Update script not found. Please try again.';
+    }
+
+    try {
+      // -Command "& 'path'" bypasses execution policy (policy only applies to -File)
+      // -WindowStyle Hidden prevents any console window from appearing
+      await Process.start(
+        'powershell.exe',
+        ['-WindowStyle', 'Hidden', '-Command', "& '$scriptPath'"],
+        mode: ProcessStartMode.detached,
+      );
+      return null;
+    } catch (e) {
+      debugPrint('❌ Failed to launch update script: $e');
+      return 'Could not start installer. Download manually from GitHub.';
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  /// Extract a ZIP archive, stripping the root folder.
+  Future<void> _extractZip(String zipPath, String extractPath) async {
+    debugPrint('📦 Extracting update...');
+    final bytes = await File(zipPath).readAsBytes();
+    final archive = ZipDecoder().decodeBytes(bytes);
+
+    if (archive.isEmpty) throw Exception('ZIP archive is empty');
+
+    // Detect root folder (e.g. MyMeta-v1.1.0-windows/)
+    // Normalize separators — Compress-Archive on Windows may use backslashes
+    final rootFolder =
+        archive.first.name.replaceAll('\\', '/').split('/').first;
+
+    for (final file in archive) {
+      if (!file.isFile) continue;
+      final normalized = file.name.replaceAll('\\', '/');
+      if (!normalized.startsWith('$rootFolder/')) continue;
+      final relative = normalized.substring(rootFolder.length + 1);
+      if (relative.isEmpty) continue;
+
+      final outPath = p.join(extractPath, relative);
+      File(outPath)
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(file.content as List<int>);
+    }
+  }
+
+  /// Create a hidden PowerShell update script.
+  /// Uses Get-Process (no console windows) and robocopy for reliable copying.
+  Future<String> _createUpdateScript({
+    required String sourcePath,
+    required String targetPath,
+    required String exeName,
+    required String scriptDir,
+  }) async {
+    final scriptPath = p.join(scriptDir, 'update_mymeta.ps1');
     final logPath = p.join(scriptDir, 'update_mymeta.log');
+    final processName =
+        exeName.replaceAll(RegExp(r'\.exe$', caseSensitive: false), '');
 
+    // Single-quoted PS strings are literal — Windows backslash paths are safe.
     final script = '''
-@echo off
-setlocal enabledelayedexpansion
+function Log(\$msg) {
+    "[(\$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')))] \$msg" |
+        Out-File -Append -Encoding utf8 -FilePath '$logPath'
+}
 
-set "LOG=$logPath"
-echo [%date% %time%] === MyMeta Update Started === >> "%LOG%"
+Log "=== MyMeta Update Started ==="
+Log "Source: $sourcePath"
+Log "Target: $targetPath"
 
-set "EXE=$exeName"
-set "SRC=$sourcePath"
-set "DST=$targetPath"
+# Wait for app to exit (with timeout)
+Log "Waiting for $processName to exit..."
+Start-Sleep -Seconds 2
+\$waited = 0
+while (Get-Process -Name '$processName' -ErrorAction SilentlyContinue) {
+    Start-Sleep -Seconds 1
+    \$waited++
+    if (\$waited -ge $_processWaitTimeoutSeconds) {
+        Log "WARNING: Timeout after \$waited seconds, proceeding anyway"
+        break
+    }
+}
+Log "Process exited after \$waited seconds"
 
-echo [%date% %time%] Source: %SRC% >> "%LOG%"
-echo [%date% %time%] Target: %DST% >> "%LOG%"
-echo [%date% %time%] Waiting for %EXE% to exit... >> "%LOG%"
+# Copy all files except UserData (preserves settings, tools, database)
+Log "Copying files..."
+\$output = & robocopy '$sourcePath' '$targetPath' /E /XD UserData /R:5 /W:2 /NP 2>&1
+\$rc = \$LASTEXITCODE
+\$output | Out-File -Append -Encoding utf8 -FilePath '$logPath'
+Log "Robocopy exit code: \$rc"
 
-timeout /t 2 /nobreak >nul 2>&1
+# robocopy: 0-7 = success, 8+ = error
+if (\$rc -ge 8) {
+    Log "ERROR: File copy failed"
+    exit 1
+}
 
-:WAIT
-tasklist /fi "imagename eq %EXE%" 2>nul | find /i "%EXE%" >nul 2>&1
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul 2>&1
-    goto WAIT
-)
-
-echo [%date% %time%] Process exited. Copying files... >> "%LOG%"
-
-:: Use robocopy to copy all files, excluding UserData (preserves settings and tools)
-robocopy "%SRC%" "%DST%" /E /XD UserData /R:5 /W:2 /NP >> "%LOG%" 2>&1
-set RC=%errorlevel%
-echo [%date% %time%] Robocopy exit code: %RC% >> "%LOG%"
-
-:: robocopy returns 0-7 for various success states, 8+ for errors
-if %RC% GEQ 8 (
-    echo [%date% %time%] ERROR: File copy failed with code %RC% >> "%LOG%"
-    goto END
-)
-
-echo [%date% %time%] Files copied successfully. Restarting app... >> "%LOG%"
-timeout /t 1 /nobreak >nul 2>&1
-start "" "%DST%\\%EXE%"
-
-:END
-echo [%date% %time%] === Update Script Finished === >> "%LOG%"
+# Restart app
+Log "Restarting app..."
+Start-Sleep -Seconds 1
+Start-Process -FilePath '$targetPath\\$exeName' -WorkingDirectory '$targetPath'
+Log "=== Update Complete ==="
 ''';
 
     await File(scriptPath).writeAsString(script);
-    debugPrint('📜 Update script created at: $scriptPath');
-    debugPrint('📜 Update log will be at: $logPath');
+    debugPrint('📜 Update script: $scriptPath');
+    debugPrint('📜 Update log: $logPath');
     return scriptPath;
   }
 
-  /// Create a Dio instance with standard connection timeout
   Dio _createDio({Duration? receiveTimeout}) => Dio(
-    BaseOptions(
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: receiveTimeout ?? const Duration(seconds: 30),
-    ),
-  );
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: receiveTimeout ?? const Duration(seconds: 30),
+        ),
+      );
 
-  /// Compare version strings (semantic versioning)
-  /// Handles version strings with suffixes like "1.0.2-release" or "1.0.2-beta"
+  /// Semantic version comparison. Returns true if [latest] > [current].
   bool _isNewerVersion(String current, String latest) {
     try {
-      // Extract only the numeric parts (strip any suffix like "-release", "-beta", etc.)
-      final currentClean = _extractSemanticVersion(current);
-      final latestClean = _extractSemanticVersion(latest);
-
-      final currentParts = currentClean.split('.').map(int.parse).toList();
-      final latestParts = latestClean.split('.').map(int.parse).toList();
-
+      final c = _parseVersion(current);
+      final l = _parseVersion(latest);
       for (int i = 0; i < 3; i++) {
-        if (latestParts[i] > currentParts[i]) return true;
-        if (latestParts[i] < currentParts[i]) return false;
+        if (l[i] > c[i]) return true;
+        if (l[i] < c[i]) return false;
       }
-      return false; // Versions are equal
+      return false;
     } catch (e) {
-      debugPrint('⚠️  Error comparing versions: $e');
+      debugPrint('⚠️ Error comparing versions: $e');
       return false;
     }
   }
 
-  /// Extract the semantic version (X.Y.Z) from a version string
-  /// Handles: "1.0.2", "1.0.2-release", "1.0.2-beta.1", etc.
-  String _extractSemanticVersion(String version) {
-    // Match pattern like "1.0.2" at the start (optionally followed by dash and suffix)
-    final regex = RegExp(r'^(\d+\.\d+\.\d+)');
-    final match = regex.firstMatch(version);
-    if (match != null) {
-      return match.group(1)!;
-    }
-    return version; // Fallback to original if no match
+  /// Parse "1.2.3" or "1.2.3-beta" into [1, 2, 3].
+  static List<int> _parseVersion(String version) {
+    final match = RegExp(r'^(\d+)\.(\d+)\.(\d+)').firstMatch(version);
+    if (match == null) throw FormatException('Invalid version: $version');
+    return [
+      int.parse(match.group(1)!),
+      int.parse(match.group(2)!),
+      int.parse(match.group(3)!),
+    ];
   }
 
-  /// Extract Windows asset URL from GitHub release assets
+  /// Find the Windows ZIP asset URL from a GitHub release.
   String _getWindowsAssetUrl(List assets) {
-    debugPrint('🔍 Searching for Windows asset in ${assets.length} assets');
-
     for (final asset in assets) {
       final name = asset['name'] as String;
-      debugPrint('  - Found asset: $name');
       if (name.contains('windows') && name.endsWith('.zip')) {
         debugPrint('✅ Using Windows asset: $name');
         return asset['browser_download_url'] as String;
       }
     }
-
-    debugPrint('❌ No Windows release found in assets');
     throw Exception(
-      'No Windows release found. Available assets: ${assets.map((a) => a['name']).join(', ')}',
+      'No Windows release found. Assets: ${assets.map((a) => a['name']).join(', ')}',
     );
   }
-}
-
-/// Information about an available update
-class UpdateInfo {
-  final String version;
-  final String downloadUrl;
-  final String releaseNotes;
-  final DateTime publishedAt;
-
-  UpdateInfo({
-    required this.version,
-    required this.downloadUrl,
-    required this.releaseNotes,
-    required this.publishedAt,
-  });
 }

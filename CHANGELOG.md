@@ -5,6 +5,13 @@ All notable changes to MyMeta will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-04-04
+
+### Fixed
+
+- **Update Process Robustness** — Rewrote the auto-update script from CMD batch to hidden PowerShell, eliminating visible console windows during updates. Process detection now uses `Get-Process` instead of `tasklist | find` (which spawned visible subprocesses). Added a 60-second timeout on process wait to prevent hangs.
+- **DRY Update Code** — Consolidated duplicated update-launch logic in the UI into a single `launchUpdateScript()` method in UpdateService. GitHub release URLs are now centralized as static getters instead of being constructed inline in multiple places.
+
 ## [1.1.1] - 2026-04-04
 
 ### Added

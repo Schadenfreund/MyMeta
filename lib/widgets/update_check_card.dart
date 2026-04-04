@@ -136,26 +136,16 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
   }
 
   Future<void> _restartToUpdate() async {
-    final scriptPath = _updateService.updateScriptPath;
-    if (scriptPath == null) return;
-
-    try {
-      await Process.start(
-        'cmd.exe',
-        ['/c', scriptPath],
-        mode: ProcessStartMode.detached,
-      );
-      exit(0);
-    } catch (e) {
-      debugPrint('Failed to launch update script: $e');
+    final error = await _updateService.launchUpdateScript();
+    if (error != null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not start installer. Download manually from GitHub.'),
-          ),
+          SnackBar(content: Text(error)),
         );
       }
+      return;
     }
+    exit(0);
   }
 
   Future<void> _dismissPendingUpdate() async {
@@ -284,9 +274,7 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
           // View releases link
           TextButton.icon(
             onPressed: () async {
-              final url = Uri.parse(
-                'https://github.com/${UpdateService.repoOwner}/${UpdateService.repoName}/releases',
-              );
+              final url = Uri.parse(UpdateService.releasesUrl);
               if (await canLaunchUrl(url)) {
                 await launchUrl(url);
               }
@@ -355,27 +343,14 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
   }
 
   Future<void> _executeUpdateAndExit() async {
-    final scriptPath = widget.updateService.updateScriptPath;
-    if (scriptPath == null) {
+    final error = await widget.updateService.launchUpdateScript();
+    if (error != null) {
       if (mounted) {
-        setState(() => _launchError = 'Update script not found. Please try again.');
+        setState(() => _launchError = error);
       }
       return;
     }
-
-    try {
-      await Process.start(
-        'cmd.exe',
-        ['/c', scriptPath],
-        mode: ProcessStartMode.detached,
-      );
-      exit(0);
-    } catch (e) {
-      debugPrint('Failed to launch update script: $e');
-      if (mounted) {
-        setState(() => _launchError = 'Could not start installer. Download manually from GitHub.');
-      }
-    }
+    exit(0);
   }
 
   @override
@@ -430,9 +405,7 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
           ),
           if (_launchError != null)
             FilledButton.icon(
-              onPressed: () => launchUrl(Uri.parse(
-                'https://github.com/${UpdateService.repoOwner}/${UpdateService.repoName}/releases/latest',
-              )),
+              onPressed: () => launchUrl(Uri.parse(UpdateService.latestReleaseUrl)),
               icon: const Icon(Icons.open_in_new),
               label: const Text('Open GitHub'),
             )
