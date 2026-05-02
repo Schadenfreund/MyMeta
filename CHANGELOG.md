@@ -5,6 +5,12 @@ All notable changes to MyMeta will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-05-02
+
+### Fixed
+
+- **Software Update Not Applying** — Pressing "Restart Now to Update" would close the app but the update was never installed. The PowerShell update script was silently blocked by Windows execution policy on launch. Fixed by adding `-ExecutionPolicy Bypass` and switching from `-Command "& 'script'"` to `-File script` for more robust path handling.
+
 ## [1.1.3] - 2026-05-02
 
 ### Added

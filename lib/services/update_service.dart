@@ -239,11 +239,17 @@ class UpdateService {
     }
 
     try {
-      // -Command "& 'path'" bypasses execution policy (policy only applies to -File)
-      // -WindowStyle Hidden prevents any console window from appearing
+      // -ExecutionPolicy Bypass is required — both -File and -Command respect execution policy
+      // for .ps1 files. Without it the script is silently blocked on most Windows installs.
+      // -NonInteractive prevents any prompts from hanging the detached process.
       await Process.start(
         'powershell.exe',
-        ['-WindowStyle', 'Hidden', '-Command', "& '$scriptPath'"],
+        [
+          '-ExecutionPolicy', 'Bypass',
+          '-NonInteractive',
+          '-WindowStyle', 'Hidden',
+          '-File', scriptPath,
+        ],
         mode: ProcessStartMode.detached,
       );
       return null;
