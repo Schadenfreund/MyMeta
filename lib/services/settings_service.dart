@@ -14,7 +14,10 @@ class SettingsService with ChangeNotifier {
   bool _useSeasonPoster = false;
   int _episodeDigits = 2; // Padding width for episode numbers (2 = E01, 3 = E001, 4 = E0001)
   int _seasonDigits = 2;  // Padding width for season numbers  (2 = S01, 3 = S001)
-  bool _metadataOnly = false; // Embed metadata without renaming files
+  bool _doRename = true;                  // Rename file on disk using the naming template
+  bool _doCover = true;                   // Remove old cover and embed new one from TMDB
+  bool _doEmbedFields = true;             // Write metadata fields (description, genre, actors, etc.)
+  bool _removeAllCoversBeforeEmbed = false; // Remove ALL image attachments before embedding (vs. only "cover*" filenames)
   String _tmdbApiKey = "";
   String _omdbApiKey = "";
   String _anidbClientId = "";
@@ -50,7 +53,10 @@ class SettingsService with ChangeNotifier {
   bool get useSeasonPoster => _useSeasonPoster;
   int get episodeDigits => _episodeDigits;
   int get seasonDigits => _seasonDigits;
-  bool get metadataOnly => _metadataOnly;
+  bool get doRename => _doRename;
+  bool get doCover => _doCover;
+  bool get doEmbedFields => _doEmbedFields;
+  bool get removeAllCoversBeforeEmbed => _removeAllCoversBeforeEmbed;
   String get tmdbApiKey => _tmdbApiKey;
   String get omdbApiKey => _omdbApiKey;
   String get anidbClientId => _anidbClientId;
@@ -128,7 +134,12 @@ class SettingsService with ChangeNotifier {
       _useSeasonPoster = data['use_season_poster'] ?? false;
       _episodeDigits = data['episode_digits'] ?? 2;
       _seasonDigits = data['season_digits'] ?? 2;
-      _metadataOnly = data['metadata_only'] ?? false;
+      // Migrate old single metadata_only flag: if it was true, doRename should be false.
+      final legacyMetadataOnly = data['metadata_only'] as bool? ?? false;
+      _doRename = data['do_rename'] as bool? ?? !legacyMetadataOnly;
+      _doCover = data['do_cover'] as bool? ?? true;
+      _doEmbedFields = data['do_embed_fields'] as bool? ?? true;
+      _removeAllCoversBeforeEmbed = data['remove_all_covers_before_embed'] as bool? ?? false;
 
       // API Keys
       _tmdbApiKey = data['tmdb_api_key'] ?? "";
@@ -341,7 +352,10 @@ class SettingsService with ChangeNotifier {
         'use_season_poster': _useSeasonPoster,
         'episode_digits': _episodeDigits,
         'season_digits': _seasonDigits,
-        'metadata_only': _metadataOnly,
+        'do_rename': _doRename,
+        'do_cover': _doCover,
+        'do_embed_fields': _doEmbedFields,
+        'remove_all_covers_before_embed': _removeAllCoversBeforeEmbed,
         'tmdb_api_key': _tmdbApiKey,
         'omdb_api_key': _omdbApiKey,
         'anidb_client_id': _anidbClientId,
@@ -405,8 +419,26 @@ class SettingsService with ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setMetadataOnly(bool value) async {
-    _metadataOnly = value;
+  Future<void> setDoRename(bool value) async {
+    _doRename = value;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> setDoCover(bool value) async {
+    _doCover = value;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> setDoEmbedFields(bool value) async {
+    _doEmbedFields = value;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> setRemoveAllCoversBeforeEmbed(bool value) async {
+    _removeAllCoversBeforeEmbed = value;
     await _saveSettings();
     notifyListeners();
   }
@@ -506,6 +538,10 @@ class SettingsService with ChangeNotifier {
     _excludedFolders = [];
     _filenameAnalysisOnly = false;
     _useSeasonPoster = false;
+    _doRename = true;
+    _doCover = true;
+    _doEmbedFields = true;
+    _removeAllCoversBeforeEmbed = false;
     _tmdbApiKey = "";
     _omdbApiKey = "";
     _anidbClientId = "";

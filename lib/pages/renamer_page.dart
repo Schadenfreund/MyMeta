@@ -309,9 +309,40 @@ class _RenamerPageState extends State<RenamerPage> {
                   const SizedBox(width: 8),
                 ],
 
-                // Metadata-Only toggle
+                // Apply-mode toggles: Rename / Cover / Fields
                 if (hasFiles) ...[
-                  _buildMetadataOnlyToggle(context, settings, isDark),
+                  _buildApplyToggle(
+                    context,
+                    icon: Icons.drive_file_rename_outline,
+                    isActive: settings.doRename,
+                    activeTooltip: 'Rename: ON — file will be renamed on disk',
+                    inactiveTooltip: 'Rename: OFF — filename will not change',
+                    onTap: () => settings.setDoRename(!settings.doRename),
+                    isDark: isDark,
+                    accentColor: settings.accentColor,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildApplyToggle(
+                    context,
+                    icon: Icons.image_outlined,
+                    isActive: settings.doCover,
+                    activeTooltip: 'Cover: ON — existing cover will be replaced',
+                    inactiveTooltip: 'Cover: OFF — existing cover will be kept',
+                    onTap: () => settings.setDoCover(!settings.doCover),
+                    isDark: isDark,
+                    accentColor: settings.accentColor,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildApplyToggle(
+                    context,
+                    icon: Icons.sell_outlined,
+                    isActive: settings.doEmbedFields,
+                    activeTooltip: 'Metadata: ON — fields (genre, actors, etc.) will be written',
+                    inactiveTooltip: 'Metadata: OFF — metadata fields will not be changed',
+                    onTap: () => settings.setDoEmbedFields(!settings.doEmbedFields),
+                    isDark: isDark,
+                    accentColor: settings.accentColor,
+                  ),
                   const SizedBox(width: 8),
                 ],
 
@@ -320,9 +351,7 @@ class _RenamerPageState extends State<RenamerPage> {
                   _buildMinimalIconButton(
                     context,
                     icon: Icons.check,
-                    tooltip: settings.metadataOnly
-                        ? 'Embed Metadata Only (no rename)'
-                        : 'Apply Metadata to All Files',
+                    tooltip: _applyTooltip(settings),
                     onPressed: () {
                       setState(() => _expandedIndex = null);
                       final settings = context.read<SettingsService>();
@@ -504,24 +533,28 @@ class _RenamerPageState extends State<RenamerPage> {
     );
   }
 
-  /// Toggle button for metadata-only mode (embed without renaming).
-  Widget _buildMetadataOnlyToggle(
-      BuildContext context, SettingsService settings, bool isDark) {
-    final isActive = settings.metadataOnly;
-    final accent = settings.accentColor;
-    final bgColor = isActive ? accent : (isDark ? AppColors.darkSurface : AppColors.lightSurface);
+  /// Reusable toggle button for apply-mode flags (rename / cover / fields).
+  Widget _buildApplyToggle(
+    BuildContext context, {
+    required IconData icon,
+    required bool isActive,
+    required String activeTooltip,
+    required String inactiveTooltip,
+    required VoidCallback onTap,
+    required bool isDark,
+    required Color accentColor,
+  }) {
+    final bgColor = isActive ? accentColor : (isDark ? AppColors.darkSurface : AppColors.lightSurface);
     final iconColor = isActive ? Colors.white : (isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary);
 
     return Tooltip(
-      message: isActive
-          ? 'Metadata Only: ON — files will not be renamed'
-          : 'Metadata Only: OFF — files will be renamed',
+      message: isActive ? activeTooltip : inactiveTooltip,
       child: Material(
         color: bgColor,
         borderRadius: BorderRadius.circular(10),
         elevation: isActive ? 2 : 1,
         child: InkWell(
-          onTap: () => settings.setMetadataOnly(!isActive),
+          onTap: onTap,
           borderRadius: BorderRadius.circular(10),
           child: Container(
             width: 40,
@@ -530,19 +563,24 @@ class _RenamerPageState extends State<RenamerPage> {
               borderRadius: BorderRadius.circular(10),
               border: isActive
                   ? null
-                  : Border.all(
-                      color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                    ),
+                  : Border.all(color: isDark ? AppColors.darkBorder : AppColors.lightBorder),
             ),
-            child: Icon(
-              Icons.drive_file_rename_outline,
-              size: 20,
-              color: iconColor,
-            ),
+            child: Icon(icon, size: 20, color: iconColor),
           ),
         ),
       ),
     );
+  }
+
+  /// Builds the Apply All button tooltip summarising which operations are enabled.
+  String _applyTooltip(SettingsService settings) {
+    final ops = [
+      if (settings.doRename) 'rename',
+      if (settings.doCover) 'cover',
+      if (settings.doEmbedFields) 'metadata',
+    ];
+    if (ops.isEmpty) return 'Apply (nothing enabled)';
+    return 'Apply: ${ops.join(' + ')}';
   }
 
   // Inline Add Files Card

@@ -1448,37 +1448,64 @@ class CoreBackend {
     return null;
   }
 
-  /// Remove old cover attachments from MKV file before attaching new one
-  /// Prevents duplicate covers and fixes Windows Explorer caching issues
+  /// Remove old cover attachments from MKV file before attaching new one.
+  ///
+  /// [removeAllImages] — when true, every attachment whose MIME type starts with
+  /// `image/` is deleted (covers all naming conventions).  When false, only
+  /// attachments whose filename contains the word "cover" are removed
+  /// (case-insensitive, so Cover.jpg / COVER.JPG are caught too).
+  /// Non-image attachments (fonts, subtitles, chapters) are never touched.
   static Future<void> _removeOldCoversFromMkv(
     String filePath,
-    String mkvpropeditPath,
-  ) async {
+    String mkvpropeditPath, {
+    bool removeAllImages = false,
+  }) async {
     try {
-      // Find all existing cover attachments
       var identifyResult = await Process.run(
-        mkvpropeditPath.replaceAll('mkvpropedit.exe', 'mkvmerge.exe'),
+        p.join(p.dirname(mkvpropeditPath), 'mkvmerge.exe'),
         ['--identify', filePath],
         runInShell: false,
       );
 
-      // Parse attachment IDs that need to be deleted
+      // Each attachment line looks like:
+      //   Attachment ID 1: type 'image/jpeg', size 89012, file name 'Cover.jpg', description ''
+      final idPattern = RegExp(r"Attachment ID (\d+):");
+      // Aggressive mode: any image/* MIME type, regardless of filename.
+      // Default mode: filename contains "cover" (case-insensitive).
+      final removePattern = removeAllImages
+          ? RegExp(r"type 'image/")
+          : RegExp(r"file name '.*cover", caseSensitive: false);
+
       List<String> deleteArgs = [filePath];
-      RegExp attachmentRegex = RegExp(r'Attachment ID (\d+):.*cover');
-      for (var match in attachmentRegex.allMatches(
-        identifyResult.stdout.toString(),
-      )) {
-        deleteArgs.addAll(['--delete-attachment', match.group(1)!]);
+      for (final line in identifyResult.stdout.toString().split('\n')) {
+        final idMatch = idPattern.firstMatch(line);
+        if (idMatch == null) continue;
+        if (removePattern.hasMatch(line)) {
+          deleteArgs.addAll(['--delete-attachment', idMatch.group(1)!]);
+        }
       }
 
-      // Delete existing covers if any found
       if (deleteArgs.length > 1) {
         await Process.run(mkvpropeditPath, deleteArgs, runInShell: false);
-        debugPrint('🗑️  Removed ${(deleteArgs.length - 1) ~/ 2} old cover(s) from MKV');
+        debugPrint('🗑️  Removed ${(deleteArgs.length - 1) ~/ 2} cover(s) from MKV');
       }
     } catch (e) {
       debugPrint('⚠️  Error removing old covers from MKV: $e');
     }
+  }
+
+  /// Build the base mkvpropedit args for writing XML tags and segment info.
+  static List<String> _buildMkvTagArgs(
+    String filePath,
+    String xmlPath,
+    String containerTitle,
+  ) {
+    return [
+      filePath,
+      '--tags', 'all:$xmlPath',
+      if (containerTitle.isNotEmpty) ...['--edit', 'info', '--set', 'title=$containerTitle'],
+      if (containerTitle.isNotEmpty) ...['--edit', 'track:v1', '--set', 'name=$containerTitle'],
+    ];
   }
 
   /// Remove old cover (attached_pic) from MP4 file before attaching new one
@@ -1535,12 +1562,19 @@ class CoreBackend {
     }
   }
 
-  /// Embed metadata into MKV file using mkvpropedit with XML tags (fast in-place)
+  /// Embed metadata into MKV file using mkvpropedit with XML tags (fast in-place).
+  ///
+  /// Cover attachment and tag writing are issued in a single mkvpropedit call so
+  /// that mkvpropedit rebuilds the file's Seekhead once for all changes.  Issuing
+  /// them as separate calls caused mkvpropedit to append the new Tags element
+  /// without updating the Seekhead, so MediaInfo could not locate it until the
+  /// file was processed a second time.
   static Future<bool> _embedMetadataMkv(
     String filePath,
     String? coverPath,
     MatchResult metadata, {
     SettingsService? settings,
+    bool embedFields = true,
   }) async {
     String? toolPath = await _resolveMkvpropedit(settings: settings);
     if (toolPath == null) {
@@ -1553,41 +1587,38 @@ class CoreBackend {
     }
 
     try {
-      bool hasAttachment = false;
-      bool hasTags = false;
+      final hasCover = coverPath != null && File(coverPath).existsSync();
+
+      // Cover-only path: skip XML tag writing entirely.
+      if (!embedFields) {
+        if (!hasCover) return false;
+        await _removeOldCoversFromMkv(filePath, toolPath,
+            removeAllImages: settings?.removeAllCoversBeforeEmbed ?? false);
+        final result = await Process.run(
+          toolPath,
+          [
+            filePath,
+            '--attachment-name', 'cover.jpg',
+            '--attachment-mime-type', 'image/jpeg',
+            '--add-attachment', coverPath,
+          ],
+          runInShell: false,
+        );
+        if (result.exitCode == 0) {
+          debugPrint('MKV cover attached');
+          return true;
+        }
+        debugPrint('mkvpropedit cover-only failed: ${result.stderr}');
+        return false;
+      }
+
       final containerTitle = _buildContainerTitle(
         metadata,
         seasonDigits: settings?.seasonDigits ?? 2,
         episodeDigits: settings?.episodeDigits ?? 2,
       );
 
-      // Step 1: Attach cover (delete existing covers first to prevent duplicates!)
-      if (coverPath != null && File(coverPath).existsSync()) {
-        // Remove old covers to prevent duplicates and Windows Explorer caching issues
-        await _removeOldCoversFromMkv(filePath, toolPath);
-
-        // Now add the new cover
-        var result = await Process.run(
-            toolPath,
-            [
-              filePath,
-              '--attachment-name',
-              'cover.jpg',
-              '--attachment-mime-type',
-              'image/jpeg',
-              '--add-attachment',
-              coverPath,
-            ],
-            runInShell: false);
-        if (result.exitCode == 0) {
-          debugPrint('Cover attached');
-          hasAttachment = true;
-        } else {
-          debugPrint('Cover failed: ${result.stderr}');
-        }
-      }
-
-      // Step 2: XML tags (writes to Tags element where FFprobe reads!)
+      // Build XML tags
       StringBuffer xml = StringBuffer();
       xml.writeln('<?xml version="1.0" encoding="UTF-8"?>');
       xml.writeln('<Tags><Tag><Targets></Targets>');
@@ -1609,8 +1640,7 @@ class CoreBackend {
       }
 
       addTag('TITLE', metadata.title);
-      if (metadata.year != null)
-        addTag('DATE_RELEASED', metadata.year.toString());
+      if (metadata.year != null) addTag('DATE_RELEASED', metadata.year.toString());
       addTag('DESCRIPTION', metadata.description);
       addTag('SYNOPSIS', metadata.description);
       if (metadata.genres != null && metadata.genres!.isNotEmpty)
@@ -1630,43 +1660,47 @@ class CoreBackend {
       }
       xml.writeln('</Tag></Tags>');
 
-      if (tagCount > 0) {
-        final exeDir = p.dirname(Platform.resolvedExecutable);
-        final cacheDir = p.join(exeDir, 'UserData', 'Cache');
-        await Directory(cacheDir).create(recursive: true);
-        String xmlPath = p.join(
-          cacheDir,
-          'tags_${DateTime.now().millisecondsSinceEpoch}.xml',
-        );
-        await File(xmlPath).writeAsString(xml.toString());
-        debugPrint('Writing $tagCount tags (in-place)...');
-        var result = await Process.run(
-            toolPath,
-            [
-              filePath,
-              '--tags',
-              'all:$xmlPath',
-              // Set segment info title and video track name in the same pass
-              if (containerTitle.isNotEmpty) ...['--edit', 'info', '--set', 'title=$containerTitle'],
-              if (containerTitle.isNotEmpty) ...['--edit', 'track:v1', '--set', 'name=$containerTitle'],
-            ],
-            runInShell: false);
-        try {
-          await File(xmlPath).delete();
-        } catch (e) {}
-        if (result.exitCode == 0) {
-          debugPrint('$tagCount tags written');
-          hasTags = true;
-        } else {
-          debugPrint('Tags failed: ${result.stderr}');
-        }
+      if (tagCount == 0) return false;
+
+      final exeDir = p.dirname(Platform.resolvedExecutable);
+      final cacheDir = p.join(exeDir, 'UserData', 'Cache');
+      await Directory(cacheDir).create(recursive: true);
+      final xmlPath = p.join(
+        cacheDir,
+        'tags_${DateTime.now().millisecondsSinceEpoch}.xml',
+      );
+      await File(xmlPath).writeAsString(xml.toString());
+
+      // Remove old covers before adding a new one to prevent duplicates.
+      // This must remain a separate call because we need mkvmerge to enumerate
+      // existing attachment IDs before we can issue --delete-attachment.
+      if (hasCover) await _removeOldCoversFromMkv(filePath, toolPath,
+          removeAllImages: settings?.removeAllCoversBeforeEmbed ?? false);
+
+      // Single combined call: tags + segment info + cover attachment.
+      // Combining everything into one invocation ensures mkvpropedit updates
+      // the Seekhead for all new/modified elements at once, which is what
+      // makes MediaInfo find the Tags element on the first apply.
+      final args = _buildMkvTagArgs(filePath, xmlPath, containerTitle);
+      if (hasCover) {
+        args.addAll([
+          '--attachment-name', 'cover.jpg',
+          '--attachment-mime-type', 'image/jpeg',
+          '--add-attachment', coverPath,
+        ]);
       }
 
-      if (hasAttachment || hasTags) {
+      debugPrint('Writing $tagCount tags${hasCover ? " + cover" : ""} (single pass)...');
+      final result = await Process.run(toolPath, args, runInShell: false);
+
+      try { await File(xmlPath).delete(); } catch (_) {}
+
+      if (result.exitCode == 0) {
         debugPrint('MKV complete (fast in-place)');
         return true;
       }
-      return false; // Neither tags nor cover succeeded — fall back to FFmpeg
+      debugPrint('mkvpropedit failed: ${result.stderr}');
+      return false;
     } catch (e) {
       debugPrint('Error: $e');
       return false;
@@ -1679,6 +1713,7 @@ class CoreBackend {
     String? coverPath,
     MatchResult metadata, {
     SettingsService? settings,
+    bool embedFields = true,
   }) async {
     String? toolPath = await _resolveAtomicParsley(settings: settings);
     if (toolPath == null) {
@@ -1686,54 +1721,52 @@ class CoreBackend {
       return false;
     }
 
+    final hasCover = coverPath != null && File(coverPath).existsSync();
+
     // Remove old covers to prevent duplicates and Windows Explorer caching issues
-    if (coverPath != null && File(coverPath).existsSync()) {
-      await _removeOldCoversFromMp4(filePath, _ffmpegPath);
-    }
+    if (hasCover) await _removeOldCoversFromMp4(filePath, _ffmpegPath);
 
     List<String> args = [filePath];
 
-    // Map metadata fields to AtomicParsley arguments
-    final containerTitle = _buildContainerTitle(
-      metadata,
-      seasonDigits: settings?.seasonDigits ?? 2,
-      episodeDigits: settings?.episodeDigits ?? 2,
-    );
-    if (containerTitle.isNotEmpty) {
-      args.addAll(['--title', containerTitle]);
-    }
+    if (embedFields) {
+      // Map metadata fields to AtomicParsley arguments
+      final containerTitle = _buildContainerTitle(
+        metadata,
+        seasonDigits: settings?.seasonDigits ?? 2,
+        episodeDigits: settings?.episodeDigits ?? 2,
+      );
+      if (containerTitle.isNotEmpty) args.addAll(['--title', containerTitle]);
 
-    if (metadata.year != null) {
-      args.addAll(['--year', metadata.year.toString()]);
-    }
+      if (metadata.year != null) {
+        args.addAll(['--year', metadata.year.toString()]);
+      }
 
-    if (metadata.description != null && metadata.description!.isNotEmpty) {
-      args.addAll(['--description', metadata.description!]);
-      args.addAll(['--longdesc', metadata.description!]);
-    }
+      if (metadata.description != null && metadata.description!.isNotEmpty) {
+        args.addAll(['--description', metadata.description!]);
+        args.addAll(['--longdesc', metadata.description!]);
+      }
 
-    if (metadata.genres != null && metadata.genres!.isNotEmpty) {
-      args.addAll(['--genre', metadata.genres!.first]);
-    }
+      if (metadata.genres != null && metadata.genres!.isNotEmpty) {
+        args.addAll(['--genre', metadata.genres!.first]);
+      }
 
-    if (metadata.director != null && metadata.director!.isNotEmpty) {
-      args.addAll(['--artist', metadata.director!]);
-    }
+      if (metadata.director != null && metadata.director!.isNotEmpty) {
+        args.addAll(['--artist', metadata.director!]);
+      }
 
-    // TV Show specifics
-    if (metadata.season != null && metadata.episode != null) {
-      args.addAll(['--TVShowName', metadata.title ?? '']);
-      args.addAll(['--TVSeasonNum', metadata.season.toString()]);
-      args.addAll(['--TVEpisodeNum', metadata.episode.toString()]);
-      if (metadata.episodeTitle != null && metadata.episodeTitle!.isNotEmpty) {
-        args.addAll(['--TVEpisode', metadata.episodeTitle!]);
+      // TV Show specifics
+      if (metadata.season != null && metadata.episode != null) {
+        args.addAll(['--TVShowName', metadata.title ?? '']);
+        args.addAll(['--TVSeasonNum', metadata.season.toString()]);
+        args.addAll(['--TVEpisodeNum', metadata.episode.toString()]);
+        if (metadata.episodeTitle != null && metadata.episodeTitle!.isNotEmpty) {
+          args.addAll(['--TVEpisode', metadata.episodeTitle!]);
+        }
       }
     }
 
     // Add cover art
-    if (coverPath != null && File(coverPath).existsSync()) {
-      args.addAll(['--artwork', coverPath]);
-    }
+    if (hasCover) args.addAll(['--artwork', coverPath]);
 
     // Overwrite in place
     args.add('--overWrite');
@@ -1812,12 +1845,15 @@ class CoreBackend {
     }
   }
 
-  /// Main metadata embedding dispatcher - tries format-specific tools first, falls back to FFmpeg
+  /// Main metadata embedding dispatcher - tries format-specific tools first, falls back to FFmpeg.
+  ///
+  /// [embedFields] — when false, metadata text fields are skipped; only the cover is updated.
   static Future<void> embedMetadata(
     String filePath,
     String? coverPath,
     MatchResult metadata, {
     SettingsService? settings,
+    bool embedFields = true,
   }) async {
     debugPrint("\n" + "=" * 60);
     debugPrint("🎬 EMBEDDING: ${p.basename(filePath)}");
@@ -1853,6 +1889,7 @@ class CoreBackend {
         coverPath,
         metadata,
         settings: settings,
+        embedFields: embedFields,
       );
     } else if (ext == '.mp4') {
       debugPrint("🔧 Attempting AtomicParsley (fast single-pass)...");
@@ -1861,18 +1898,24 @@ class CoreBackend {
         coverPath,
         metadata,
         settings: settings,
+        embedFields: embedFields,
       );
     }
 
     // Fall back to FFmpeg if specialized tool failed or unavailable
     if (!success) {
-      debugPrint("⚠️  Falling back to FFmpeg (slower but reliable)...");
-      await _embedMetadataFFmpeg(
-        filePath,
-        coverPath,
-        metadata,
-        settings: settings,
-      );
+      if (!embedFields && !hasCover) {
+        debugPrint("⚠️  Nothing to embed (fields off, no cover) — skipping FFmpeg fallback");
+      } else {
+        debugPrint("⚠️  Falling back to FFmpeg (slower but reliable)...");
+        await _embedMetadataFFmpeg(
+          filePath,
+          coverPath,
+          metadata,
+          settings: settings,
+          embedFields: embedFields,
+        );
+      }
     }
 
     debugPrint("=" * 60 + "\n");
@@ -1884,6 +1927,7 @@ class CoreBackend {
     String? coverPath,
     MatchResult metadata, {
     SettingsService? settings,
+    bool embedFields = true,
   }) async {
     String ext = p.extension(filePath).toLowerCase();
     bool hasCover = coverPath != null && File(coverPath).existsSync();
@@ -1954,58 +1998,60 @@ class CoreBackend {
     // === METADATA ===
     int metaCount = 0;
 
-    void addMeta(String key, String? value) {
-      if (value != null && value.isNotEmpty) {
-        args.addAll(['-metadata', '$key=${_escapeMetadata(value)}']);
+    if (embedFields) {
+      void addMeta(String key, String? value) {
+        if (value != null && value.isNotEmpty) {
+          args.addAll(['-metadata', '$key=${_escapeMetadata(value)}']);
+          metaCount++;
+        }
+      }
+
+      // Basic Info — use the formatted container title for both the file title tag
+      // and the video stream title so media players display it correctly.
+      final containerTitle = _buildContainerTitle(
+        metadata,
+        seasonDigits: settings?.seasonDigits ?? 2,
+        episodeDigits: settings?.episodeDigits ?? 2,
+      );
+      addMeta('title', containerTitle);
+      if (containerTitle.isNotEmpty) {
+        args.addAll(['-metadata:s:v:0', 'title=${_escapeMetadata(containerTitle)}']);
         metaCount++;
       }
-    }
+      if (metadata.year != null) {
+        addMeta('year', metadata.year.toString());
+        addMeta('date', metadata.year.toString());
+      }
 
-    // Basic Info — use the formatted container title for both the file title tag
-    // and the video stream title so media players display it correctly.
-    final containerTitle = _buildContainerTitle(
-      metadata,
-      seasonDigits: settings?.seasonDigits ?? 2,
-      episodeDigits: settings?.episodeDigits ?? 2,
-    );
-    addMeta('title', containerTitle);
-    if (containerTitle.isNotEmpty) {
-      args.addAll(['-metadata:s:v:0', 'title=${_escapeMetadata(containerTitle)}']);
-      metaCount++;
-    }
-    if (metadata.year != null) {
-      addMeta('year', metadata.year.toString());
-      addMeta('date', metadata.year.toString());
-    }
+      // Extended Info
+      addMeta('comment', metadata.description);
+      addMeta('description', metadata.description);
+      addMeta('synopsis', metadata.description);
 
-    // Extended Info
-    addMeta('comment', metadata.description);
-    addMeta('description', metadata.description);
-    addMeta('synopsis', metadata.description);
+      if (metadata.genres != null && metadata.genres!.isNotEmpty) {
+        addMeta('genre', metadata.genres!.join(', '));
+      }
 
-    if (metadata.genres != null && metadata.genres!.isNotEmpty) {
-      addMeta('genre', metadata.genres!.join(', '));
-    }
+      addMeta('director', metadata.director);
+      addMeta('artist', metadata.director);
 
-    addMeta('director', metadata.director);
-    addMeta('artist', metadata.director);
+      if (metadata.actors != null && metadata.actors!.isNotEmpty) {
+        addMeta('actor', metadata.actors!.join(', '));
+      }
 
-    if (metadata.actors != null && metadata.actors!.isNotEmpty) {
-      addMeta('actor', metadata.actors!.join(', '));
-    }
+      if (metadata.rating != null) {
+        addMeta('rating', metadata.rating.toString());
+      }
 
-    if (metadata.rating != null) {
-      addMeta('rating', metadata.rating.toString());
-    }
+      addMeta('content_rating', metadata.contentRating);
 
-    addMeta('content_rating', metadata.contentRating);
-
-    // TV Show specifics
-    if (metadata.season != null && metadata.episode != null) {
-      addMeta('show', metadata.title);
-      addMeta('season_number', metadata.season.toString());
-      addMeta('episode_sort', metadata.episode.toString());
-      addMeta('episode_id', metadata.episodeTitle);
+      // TV Show specifics
+      if (metadata.season != null && metadata.episode != null) {
+        addMeta('show', metadata.title);
+        addMeta('season_number', metadata.season.toString());
+        addMeta('episode_sort', metadata.episode.toString());
+        addMeta('episode_id', metadata.episodeTitle);
+      }
     }
 
     args.add(tempPath);

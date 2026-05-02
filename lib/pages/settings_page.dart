@@ -186,6 +186,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   activeColor: settings.accentColor,
                 ),
               ),
+              const SizedBox(height: AppSpacing.md),
+              AppSettingRow(
+                title: 'Remove All Covers Before Embed',
+                description: 'MKV only. When enabled, all image attachments (any name, image/jpeg or image/png) are removed before the new cover is added. When disabled, only attachments whose filename contains "cover" are removed. Has no effect when "Update Cover" is turned off.',
+                control: Switch(
+                  value: settings.removeAllCoversBeforeEmbed,
+                  onChanged: settings.setRemoveAllCoversBeforeEmbed,
+                  activeColor: settings.accentColor,
+                ),
+              ),
             ],
           ),
 

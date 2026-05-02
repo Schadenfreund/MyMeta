@@ -4,231 +4,176 @@ Technical documentation for developers and contributors.
 
 ---
 
-## 🏗️ Architecture Overview
+## Overview
 
-MyMeta is built with Flutter using a clean architecture pattern with clear separation of concerns.
+MyMeta is a Flutter Windows desktop application for fetching, editing, and embedding metadata into video files. It follows a clean layered architecture with clear separation of concerns.
 
 ```
 ┌─────────────────────────────────────────┐
 │           Presentation Layer            │
-│  (Pages, Widgets, UI Components)        │
+│  (Pages, Widgets, Modals)               │
 ├─────────────────────────────────────────┤
 │          Business Logic Layer           │
 │    (Services, State Management)         │
 ├─────────────────────────────────────────┤
 │            Data Layer                   │
-│  (Backend, API Clients, FFmpeg)         │
+│  (Backend, API Services, SQLite, Utils) │
 └─────────────────────────────────────────┘
 ```
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 lib/
-├── main.dart                 # App entry point
+├── main.dart                          # Entry point — window setup, providers, theme
 ├── backend/
-│   ├── core_backend.dart     # FFmpeg operations, metadata embedding
-│   ├── match_result.dart     # Metadata result models
-│   └── media_record.dart     # Media record models
+│   ├── core_backend.dart              # Metadata embedding, file ops, title formatting
+│   ├── match_result.dart              # MatchResult model (metadata from API)
+│   ├── media_record.dart              # MediaRecord model (per-file state)
+│   └── filename_parser.dart           # Extracts series/episode info from filenames
+├── constants/
+│   └── app_constants.dart             # MetadataSource & ContentType enums, app-wide constants
 ├── pages/
-│   ├── home_page.dart        # Main layout with sidebar
-│   ├── renamer_page.dart     # File management UI
-│   ├── formats_page.dart     # Naming format configuration
-│   └── settings_page.dart    # App settings
-├── widgets/
-│   ├── app_card.dart         # Centralized card components (NEW)
-│   ├── custom_titlebar.dart  # Custom window controls
-│   ├── accent_color_picker.dart  # Color selection widget
-│   ├── about_card.dart       # About information card
-│   ├── tool_paths_card.dart  # Tool configuration card
-│   └── inline_metadata_editor.dart  # Metadata editing UI
+│   ├── home_page.dart                 # Root layout — sidebar nav, tab management
+│   ├── renamer_page.dart              # File list, match/rename workflow UI
+│   ├── formats_page.dart              # Naming template config + live preview
+│   └── settings_page.dart            # API keys, tools, theme, updates
 ├── services/
-│   ├── file_state_service.dart      # File list state management
-│   ├── settings_service.dart        # App settings persistence
-│   └── tool_downloader_service.dart # Tool download & setup
-└── theme/
-    └── app_theme.dart        # Centralized theme constants
+│   ├── file_state_service.dart        # ChangeNotifier — file list, match/rename ops, undo
+│   ├── settings_service.dart          # ChangeNotifier — persists settings to SQLite
+│   ├── tmdb_service.dart              # TMDB API — movies & TV metadata
+│   ├── omdb_service.dart              # OMDb API — IMDb-based metadata
+│   ├── anidb_service.dart             # AniDB + Jikan API — anime metadata
+│   ├── poster_cache_service.dart      # Downloads and caches cover art locally
+│   ├── tool_downloader_service.dart   # Downloads FFmpeg, MKVToolNix, AtomicParsley
+│   └── update_service.dart           # GitHub release check, download, and apply updates
+├── theme/
+│   └── app_theme.dart                 # MaterialTheme definitions, accent color helpers
+├── utils/
+│   ├── http_client.dart               # Shared HTTP client (15s timeout, retry)
+│   ├── cover_extractor.dart           # Extracts embedded cover art from video files
+│   ├── image_utils.dart               # Image resize via FFmpeg, format helpers
+│   ├── safe_parser.dart               # Null-safe parse helpers (year, int, double, list)
+│   ├── snackbar_helper.dart           # Centralized snackbar/toast notifications
+│   └── windows_thumbnail.dart         # Windows shell thumbnail extraction
+└── widgets/
+    ├── app_card.dart                  # AppCard, AppCardHeader, AppSettingRow, AppLabeledInput
+    ├── custom_titlebar.dart           # Custom window titlebar with min/max/close
+    ├── inline_metadata_editor.dart    # Expandable per-file metadata editor
+    ├── edit_metadata_dialog.dart      # Dialog-based metadata editor
+    ├── cover_picker_modal.dart        # Cover art browse/search/select modal
+    ├── collapsible_card.dart          # Accordion card container
+    ├── accent_color_picker.dart       # 8-color accent picker widget
+    ├── about_card.dart                # Version + credits card
+    ├── tool_paths_card.dart           # FFmpeg/MKVToolNix/AtomicParsley path config
+    └── update_check_card.dart         # Update availability banner + download UI
 ```
 
 ---
 
-## 🔄 Data Flow
+## Data Flow
 
-### **File Rename Workflow**
+### File Rename Workflow
 
 ```
-User Action → State Service → Backend → FFmpeg → File System
-     ↓            ↓              ↓         ↓          ↓
-  UI Event → Update State → API Call → Process → Update File
-                ↓                                      ↓
-          Notify Listeners ←─────────────────── Success/Error
-                ↓
-          Update UI
+User Action → FileStateService → CoreBackend → External Tool → File System
+     ↓               ↓                ↓               ↓              ↓
+  UI Event  →  Update State  →  Build Command  →  Execute  →  Update File
+                    ↓                                                ↓
+             Notify Listeners ←─────────────────────────────  Success/Error
+                    ↓
+              Rebuild UI
 ```
 
-### **Metadata Matching Flow**
+### Metadata Matching Flow
 
 ```
 1. User adds files
    └→ FileStateService.addFiles()
+       └→ FilenameParser extracts title, year, season, episode
 
 2. User clicks Match
    └→ FileStateService.matchFiles()
-       ├→ Parse filename
-       ├→ Query TMDB/OMDb API
-       ├→ Download cover art
-       └→ Store MatchResult
+       ├→ Query TMDB / OMDb / AniDB (via service layer)
+       ├→ PosterCacheService downloads & caches cover art
+       └→ Store MatchResult on MediaRecord
 
-3. User clicks Rename
+3. User clicks Apply / Rename
    └→ FileStateService.renameFiles()
-       ├→ Generate new filename
-       ├→ Call CoreBackend.embedMetadata()
-       │   ├→ Build FFmpeg command
-       │   ├→ Execute FFmpeg
-       │   └→ Verify output
-       └→ Update file state
+       ├→ CoreBackend.generateFilename() — applies naming template
+       ├→ CoreBackend.embedMetadata()
+       │   ├→ AtomicParsley (MP4, if available)
+       │   ├→ mkvpropedit (MKV, if available)
+       │   └→ FFmpeg fallback
+       └→ Rename file on disk, push to undo stack
 ```
 
 ---
 
-## 🧩 Core Components
+## Core Components
 
-### **1. FileStateService**
-**Purpose:** Manages file list state and operations
+### FileStateService
 
-**Key Responsibilities:**
-- Add/remove files from list
-- Match metadata via API
-- Execute rename operations
-- Track undo history
-- Notify UI of changes
+Central ChangeNotifier managing the file list and all batch operations.
 
 **State:**
 ```dart
-List<InputFileData> _inputFiles
-List<MatchResult> _matchResults
-List<UndoData> _undoStack
+List<MediaRecord> _files
 bool _isLoading
+bool _metadataOnlyMode
+List<UndoData> _undoStack
 ```
 
-**Key Methods:**
-- `addFiles(List<XFile>)` - Add files to list
-- `matchFiles(SettingsService)` - Fetch metadata
-- `renameFiles()` - Execute rename + embed
-- `undo()` - Revert last operation
-- `clearAll()` / `clearRenamedFiles()` - Cleanup
+**Key methods:** `addFiles()`, `matchFiles()`, `renameFiles()`, `undo()`, `clearAll()`
 
-### **2. SettingsService**
-**Purpose:** Persist and manage app settings
+### SettingsService
+ChangeNotifier that persists all user settings to a **SQLite** database via `sqflite_common_ffi`. The database lives in `UserData/` (AppData/Roaming).
 
-**Storage:** SharedPreferences (local key-value store)
+**Settings managed:** theme mode, accent color, API keys (TMDB/OMDb/AniDB), metadata provider, naming templates, tool paths (FFmpeg/mkvpropedit/AtomicParsley), excluded folders, number-padding digits, metadata-only mode.
 
-**Settings Managed:**
-- Theme mode (light/dark)
-- Accent color
-- API keys (TMDB, OMDb)
-- Metadata provider preference
-- Naming format templates
-- Excluded folders list
+On startup, saved tool paths are validated and auto-corrected if the app has been moved (portable app support).
 
-**Persistence:**
-```dart
-await _prefs.setString(key, value)
-value = _prefs.getString(key) ?? default
-```
+### CoreBackend
 
-### **3. CoreBackend**
-**Purpose:** FFmpeg integration and metadata embedding
+Handles metadata embedding and filename generation.
 
-**Key Features:**
-- FFmpeg path detection (bundled → PATH)
-- Metadata escaping for FFmpeg
-- MP4 cover embedding (attached_pic)
-- MKV cover attachment
-- Command caching for performance
+**Embedding priority per format:**
 
-**Critical Methods:**
+- MP4: AtomicParsley → FFmpeg fallback
+- MKV: mkvpropedit (XML tags + cover attachment) → FFmpeg fallback
 
-#### `embedMetadata(filePath, coverPath, metadata)`
-```dart
-1. Validate inputs
-2. Check FFmpeg availability
-3. Build FFmpeg command:
-   - Set codec (copy)
-   - Add cover art
-   - Embed metadata fields
-4. Execute FFmpeg
-5. Verify temp output
-6. Replace original file
-7. Cleanup
-```
+**Filename generation** uses template substitution (`{movie_name}`, `{year}`, `{series_name}`, `{season_number}`, `{episode_number}`, `{episode_title}`) with configurable digit padding for season/episode numbers.
 
-#### `_checkFFmpegAvailable()`
-```dart
-1. Check bundled: app_dir/ffmpeg.exe
-2. Fallback to PATH
-3. Cache result
-4. Return true/false
-```
+**FFmpeg path resolution:** `UserData/tools/ffmpeg/` → app directory → system PATH, cached for the session.
+
+### API Services
+Each service uses the shared `HttpClient` (15-second timeout, retry logic).
+
+| Service       | Source         | Format    |
+|---------------|----------------|-----------|
+| `TmdbService` | themoviedb.org | JSON      |
+| `OmdbService` | omdbapi.com    | JSON      |
+| `AnidbService`| AniDB + Jikan  | XML + JSON|
+
+All services support title overrides and episode-specific metadata (description, title).
+
+### PosterCacheService
+
+Downloads cover art from TMDB/OMDb URLs, resizes via FFmpeg (if available), and stores locally in `UserData/cache/`. Falls back to caching the original download when FFmpeg resize is unavailable.
+
+### UpdateService
+
+Checks the GitHub Releases API for new versions. Downloads the release ZIP into `UserData/Updates/`, extracts it, and applies the update via a hidden PowerShell script that waits for the app to close before replacing files. `UserData/` is preserved across updates.
 
 ---
 
-## 🎨 UI Architecture
+## UI Architecture
 
-### **Custom Titlebar**
-Replaces system titlebar with custom implementation:
-- Window dragging
-- Minimize/Maximize/Close buttons
-- Double-click to maximize
-- Theme-aware styling
+### State Management
+Provider pattern — two root ChangeNotifiers injected at app startup:
 
-### **Sidebar Navigation**
-Auto-hide vertical sidebar with:
-- Tab selection
-- Accent color highlight
-- Soft glow effect
-- Hover to reveal
-- Icons + labels
-
-### **Centralized Card Components** ⭐ NEW
-Reusable UI components following DRY principles:
-
-**AppCard** - Main card container
-```dart
-AppCard(
-  title: 'Settings',
-  icon: Icons.settings,
-  description: 'Configure your preferences',
-  accentColor: accentColor,
-  children: [...],
-)
-```
-
-**AppCardHeader** - Inline title + description
-- Bold white title and grey description on same line
-- Consistent spacing and alignment
-- Accent color icon
-
-**AppSettingRow** - Setting with inline labels
-- Title and description inline (not stacked)
-- Control widget on the right
-- Baseline alignment for text
-
-**AppLabeledInput** - Input with inline labels
-- Label and description inline
-- Input field below
-- Consistent spacing
-
-**Benefits:**
-- ✅ DRY - Single source of truth
-- ✅ Consistency - Uniform look across pages
-- ✅ Maintainability - Easy to update globally
-- ✅ Code reduction - ~168 lines saved
-
-### **State Management**
-Uses Provider pattern:
 ```dart
 MultiProvider(
   providers: [
@@ -239,240 +184,127 @@ MultiProvider(
 )
 ```
 
-UI widgets watch services:
-```dart
-final settings = context.watch<SettingsService>();
-final fileState = context.watch<FileStateService>();
-```
+Widgets subscribe with `context.watch<T>()` or read once with `context.read<T>()`.
+
+### Centralized Card System (`app_card.dart`)
+
+All settings-style UI is built from these composable components:
+
+- **`AppCard`** — titled card container with icon and optional description
+- **`AppCardHeader`** — icon + bold title + grey description on one line
+- **`AppSettingRow`** — label/description on the left, control widget on the right
+- **`AppLabeledInput`** — inline label + text input field
+
+Always use these components for new settings UI. Do not introduce one-off styled containers.
+
+### Custom Titlebar
+Replaces the OS titlebar. Handles drag-to-move, double-click maximize, and min/max/close buttons. Theme-aware.
+
+### Sidebar Navigation
+Auto-hide vertical sidebar. Icons + labels, accent-color highlight, soft glow on active tab. Tabs: Renamer, Formats, Settings.
 
 ---
 
-## 🔌 External Dependencies
+## External Tools
 
-### **Flutter Packages**
+Tools are **not bundled** — they are downloaded by the user via Settings → Setup Tools and stored in `UserData/tools/`.
+
+| Tool                     | Purpose                                | Speed vs FFmpeg |
+|--------------------------|----------------------------------------|-----------------|
+| FFmpeg                   | Metadata embedding fallback (required) | baseline        |
+| AtomicParsley            | Fast MP4 metadata embedding            | ~60–120× faster |
+| MKVToolNix (mkvpropedit) | Fast MKV metadata embedding            | ~60–120× faster |
+
+---
+
+## External Dependencies
 
 **UI & Platform:**
-- `flutter` - Core framework
-- `window_manager` - Custom titlebar
-- `provider` - State management
+
+- `window_manager` — custom titlebar and window control
+- `provider` — state management
+- `flutter_markdown` — markdown rendering
 
 **File Handling:**
-- `file_picker` - File selection dialog
-- `desktop_drop` - Drag & drop support
-- `cross_file` - Cross-platform file abstraction
-- `path` - Path manipulation
+
+- `file_picker` — file selection dialog
+- `desktop_drop` — drag-and-drop
+- `path` / `path_provider` — path manipulation and platform directories
 
 **Storage:**
-- `shared_preferences` - Settings persistence
 
-**HTTP:**
-- `http` - API requests (TMDB, OMDb)
+- `sqflite_common_ffi` + `sqlite3_flutter_libs` — SQLite for settings persistence
 
-### **External Tools**
+**Networking:**
 
-**FFmpeg** (Bundled)
-- Version: Latest stable
-- Purpose: Metadata embedding
-- Location: `app_dir/ffmpeg.exe`
-- Fallback: System PATH
+- `http` — TMDB/OMDb/AniDB API requests
+- `dio` — update download with progress tracking
+- `url_launcher` — open URLs in browser
+
+**Data Processing:**
+
+- `xml` — AniDB XML parsing
+- `archive` — ZIP extraction for updates
+- `package_info_plus` — read app version at runtime
 
 ---
 
-## 🔐 Security & Privacy
+## Security & Privacy
 
-### **API Keys**
-- Stored in SharedPreferences (local)
-- Never transmitted except to respective APIs
-- User-provided (not hardcoded)
-
-### **File Access**
-- Only files user explicitly selects
-- All processing local
-- No file upload to external servers
-
-### **Network Requests**
-- Only to TMDB/OMDb APIs
-- Only for metadata queries
+- API keys stored locally in SQLite, never hardcoded
+- All processing happens on-device; only metadata queries leave the machine
+- Network requests go only to TMDB, OMDb, AniDB, and GitHub Releases
 - No telemetry or analytics
 
 ---
 
-## 📊 Performance Optimizations
+## Performance
 
-### **FFmpeg Caching**
-```dart
-static bool? _ffmpegAvailable;
-static String? _ffmpegPath;
-```
-Checks FFmpeg once per session.
-
-### **Lazy Loading**
-UI only loads visible items in scrollable lists.
-
-### **Async Operations**
-All file I/O and network requests are async:
-```dart
-await Future.wait([
-  _fetchMetadata(file1),
-  _fetchMetadata(file2),
-])
-```
-
-### **Codec Copy**
-FFmpeg uses `-c copy` to avoid re-encoding:
-- No quality loss
-- 100x faster than re-encoding
-- Minimal CPU usage
+- **Codec copy** (`-c copy`) — FFmpeg embeds metadata without re-encoding; no quality loss
+- **Parallel fetching** — `Future.wait()` for concurrent metadata requests
+- **FFmpeg path cached** — discovered once per session
+- **Poster cache** — avoids re-downloading the same cover art
 
 ---
 
-## 🧪 Testing Strategy
+## Build & Distribution
 
-### **Manual Testing**
-Test each workflow:
-1. Add files → Match → Rename
-2. Inline editing
-3. Undo operation
-4. Settings persistence
-5. Theme switching
-6. Format customization
-
-### **Edge Cases**
-- Large files (>20GB)
-- Special characters in filenames
-- Missing metadata
-- Network failures
-- File permissions
-
-### **Platforms**
-- Windows 10
-- Windows 11
-
----
-
-## 🚀 Build & Distribution
-
-### **Development Build**
 ```bash
-flutter run
-```
+# Development
+flutter run -d windows
 
-### **Release Build**
-```bash
+# Release
 flutter build windows --release
 ```
 
-### **FFmpeg Bundling**
-```powershell
-.\bundle_ffmpeg.ps1
+The portable distribution is a flat folder (no installer):
 ```
-
-### **Distribution Package**
-```
-MyMeta-v1.6.0/
+MyMeta-v1.x.x/
 ├── MyMeta.exe
-├── ffmpeg.exe
 ├── flutter_windows.dll
 └── data/
 ```
 
----
-
-## 🔧 Development Setup
-
-### **Prerequisites**
-- Flutter SDK 3.0+
-- Windows 10/11
-- Visual Studio 2022 (C++ tools)
-- Git
-
-### **Clone & Setup**
-```bash
-git clone <repository>
-cd mymeta
-flutter pub get
-```
-
-### **Run**
-```bash
-flutter run -d windows
-```
-
-### **Build**
-```bash
-flutter build windows --release
-.\bundle_ffmpeg.ps1
-```
+`UserData/` (AppData/Roaming/MyMeta) contains all user data: settings DB, tool binaries, poster cache, update downloads. It is preserved across updates and app moves.
 
 ---
 
-## 📝 Code Style
+## Code Style
 
-### **Naming Conventions**
-- Classes: `PascalCase`
-- Files: `snake_case.dart`
-- Variables: `camelCase`
-- Constants: `camelCase` or `SCREAMING_SNAKE_CASE`
-
-### **File Organization**
-- One widget per file (exception: small private helper widgets)
-- Group related functionality
-- Clear imports at top
-- Reusable components in `widgets/` folder
-
-### **State Management**
-- Use Provider for app-wide state
-- Local `setState` for widget-specific state
-- Notify listeners on state changes
-
-### **DRY Principles** ⭐ NEW
-- **Don't Repeat Yourself** - Create reusable components
-- Use centralized widgets (AppCard, AppCardHeader, etc.)
-- Extract common patterns into shared components
-- Single source of truth for styling and layout
-- Understand the architecture before creating new patterns
-
-### **Component Reusability**
-- Use existing components from `widgets/app_card.dart`
-- Follow established patterns for consistency
-- Update existing components rather than creating duplicates
-- Document new reusable components
+- Classes: `PascalCase` | Files: `snake_case.dart` | Variables: `camelCase`
+- One widget/service per file; small private helpers may live alongside their parent
+- Use `AppCard` and its sub-components for all settings-style UI
+- Use `HttpClient` wrapper for all external HTTP calls
+- Use `SafeParser` utilities for untrusted/nullable external data
+- DRY: extract repeated logic into shared utils; do not duplicate embedding or parsing code
+- No comments unless the *why* is non-obvious from the code itself
 
 ---
 
-## 🌟 Future Enhancements
-
-### **Planned Features**
-- Progress indicators during batch processing
-- Parallel metadata fetching
-- Preview before rename
-- Keyboard shortcuts
-- Watch folder automation
-- Cross-platform (macOS, Linux)
-
-### **Technical Debt**
-- Add unit tests
-- Implement error boundaries
-- Add logging framework
-- Improve error messages
-
----
-
-## 📚 Additional Resources
+## Additional Resources
 
 - [Flutter Documentation](https://flutter.dev/docs)
 - [FFmpeg Documentation](https://ffmpeg.org/documentation.html)
 - [TMDB API Docs](https://developers.themoviedb.org/3)
 - [OMDb API Docs](http://www.omdbapi.com/)
-
----
-
-<div align="center">
-
-**MyMeta Architecture**
-
-Clean, maintainable, extensible
-
-[README](README.md) | [Quick Start](QUICK_START.md)
-
-</div>
+- [AniDB API Docs](https://wiki.anidb.net/API)
