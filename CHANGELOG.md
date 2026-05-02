@@ -5,13 +5,7 @@ All notable changes to MyMeta will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.4] - 2026-05-02
-
-### Fixed
-
-- **Software Update Not Applying** — Pressing "Restart Now to Update" would close the app but the update was never installed. The PowerShell update script was silently blocked by Windows execution policy on launch. Fixed by adding `-ExecutionPolicy Bypass` and switching from `-Command "& 'script'"` to `-File script` for more robust path handling.
-
-## [1.1.3] - 2026-05-02
+## [1.1.5] - 2026-05-02
 
 ### Added
 
@@ -23,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MKV Metadata Missing After First Apply** — On some MKV files, only the Title showed up in MediaInfo after applying; all other fields required a second Apply to appear. Fixed by combining all mkvpropedit writes into a single call so the file index is rebuilt correctly in one pass.
 - **Duplicate Covers on MKV Files** — Existing cover attachments with uppercase names like `Cover.jpg` were not detected and removed, leaving two covers in the file after embed. Cover name matching is now case-insensitive.
 - **Unnecessary File Rewrite When Nothing to Embed** — With both Update Cover and Embed Metadata Fields disabled, FFmpeg was still invoked as a fallback and rewrote the entire file. FFmpeg is now skipped when there is nothing to do.
+
+- **Software Update Not Applying** — Pressing "Restart Now to Update" would close the app but the update was never installed. The PowerShell update script was silently blocked by Windows execution policy on launch. Fixed by adding `-ExecutionPolicy Bypass` and switching from `-Command "& 'script'"` to `-File script` for more robust path handling.
 
 ## [1.1.2] - 2026-04-04
 

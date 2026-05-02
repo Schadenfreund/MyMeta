@@ -239,17 +239,26 @@ class UpdateService {
     }
 
     try {
-      // -ExecutionPolicy Bypass is required — both -File and -Command respect execution policy
-      // for .ps1 files. Without it the script is silently blocked on most Windows installs.
-      // -NonInteractive prevents any prompts from hanging the detached process.
+      // Encode the script as UTF-16LE Base64 for PowerShell's -EncodedCommand.
+      // Unlike -File and -Command, -EncodedCommand is not subject to execution
+      // policy at all — the most reliable way to run a script on any Windows install.
+      final scriptContent = await File(scriptPath).readAsString();
+      final utf16leBytes = <int>[];
+      for (final char in scriptContent.codeUnits) {
+        utf16leBytes.add(char & 0xFF);
+        utf16leBytes.add((char >> 8) & 0xFF);
+      }
+      final encodedCommand = base64.encode(utf16leBytes);
+
+      // Route through cmd /c start /b to break Job Object inheritance.
+      // ProcessStartMode.detached uses DETACHED_PROCESS which does NOT break
+      // out of the parent's Windows Job Object. If the Job has
+      // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE (set by VS Code, Explorer, etc.),
+      // the child is killed the moment exit(0) closes the parent.
+      // cmd's start command spawns into a new independent context that survives this.
       await Process.start(
-        'powershell.exe',
-        [
-          '-ExecutionPolicy', 'Bypass',
-          '-NonInteractive',
-          '-WindowStyle', 'Hidden',
-          '-File', scriptPath,
-        ],
+        'cmd.exe',
+        ['/c', 'start', '/b', 'powershell.exe', '-NonInteractive', '-EncodedCommand', encodedCommand],
         mode: ProcessStartMode.detached,
       );
       return null;
