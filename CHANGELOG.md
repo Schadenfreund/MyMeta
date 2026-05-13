@@ -5,6 +5,12 @@ All notable changes to MyMeta will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2026-05-14
+
+### Added
+
+- **Season Covers** — New toolbar button (photo album icon) opens a Season Covers dialog when TV episode files are loaded. Files are grouped by series + season. Each row shows the current cover thumbnail, an Auto button that fetches the season-specific poster from TMDB (falling back to the show-level poster), and a Search button that opens the full cover picker. Confirming applies the chosen cover bytes to every episode in each group.
+
 ## [1.1.6] - 2026-05-14
 
 ### Added

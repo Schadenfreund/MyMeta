@@ -15,6 +15,7 @@ class CoverPickerModal extends StatefulWidget {
   final Function(String) onSelected;
   final String? initialSearchQuery;
   final bool isMovie;
+  final int? season; // when set, TMDB search returns season-specific posters
 
   const CoverPickerModal({
     super.key,
@@ -23,6 +24,7 @@ class CoverPickerModal extends StatefulWidget {
     required this.onSelected,
     this.initialSearchQuery,
     this.isMovie = true,
+    this.season,
   });
 
   @override
@@ -88,7 +90,16 @@ class _CoverPickerModalState extends State<CoverPickerModal> {
           if (result != null) posters = await tmdb.getMoviePosters(result['id'] as int);
         } else {
           final result = await tmdb.searchTV(query);
-          if (result != null) posters = await tmdb.getTVPosters(result['id'] as int);
+          if (result != null) {
+            final tvId = result['id'] as int;
+            if (widget.season != null) {
+              // Season-specific gallery first; fall back to show-level posters
+              posters = await tmdb.getSeasonPosters(tvId, widget.season!);
+              if (posters.isEmpty) posters = await tmdb.getTVPosters(tvId);
+            } else {
+              posters = await tmdb.getTVPosters(tvId);
+            }
+          }
         }
       } else if (_selectedSource == 'omdb') {
         final omdb = OmdbService(apiKey);

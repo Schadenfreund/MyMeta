@@ -147,6 +147,22 @@ class TmdbService {
     return lookup;
   }
 
+  /// Get all available posters for a specific season (sorted by vote count).
+  /// Falls back to an empty list — caller should fall back to [getTVPosters].
+  Future<List<String>> getSeasonPosters(int tvId, int season) async {
+    final uri = Uri.parse(
+        '$_baseUrl/tv/$tvId/season/$season/images?api_key=$apiKey&language=en');
+    final data = await ApiClient.getJson(uri);
+    if (data == null) return [];
+    final List posters = data['posters'] ?? [];
+    final sorted = posters.where((p) => p['file_path'] != null).toList()
+      ..sort((a, b) => (b['vote_count'] ?? 0).compareTo(a['vote_count'] ?? 0));
+    return sorted
+        .map((p) =>
+            '${ImageConfig.tmdbImageBaseUrl}${ImageConfig.tmdbPosterSize}${p['file_path']}')
+        .toList();
+  }
+
   /// Fetch the poster URL for a specific season.
   /// Returns null if the season has no poster (caller should fall back to show poster).
   Future<String?> getSeasonPosterUrl(int tvId, int season) async {

@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
@@ -6,10 +7,12 @@ import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import '../services/settings_service.dart';
 import '../services/file_state_service.dart';
+import '../services/tmdb_service.dart';
 import '../backend/media_record.dart';
 import '../backend/match_result.dart';
 import '../backend/core_backend.dart';
 import '../widgets/inline_metadata_editor.dart';
+import '../widgets/cover_picker_modal.dart';
 import '../theme/app_theme.dart';
 import '../utils/snackbar_helper.dart';
 import 'package:path/path.dart' as p;
@@ -304,6 +307,20 @@ class _RenamerPageState extends State<RenamerPage> {
                         }
                       }
                     },
+                    isDark: isDark,
+                    iconColor: settings.accentColor,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+
+                // Season Covers Button — shown when episode files with season data are loaded
+                if (hasFiles && _hasSeasonGroups(fileState)) ...[
+                  _buildMinimalIconButton(
+                    context,
+                    icon: Icons.photo_album_outlined,
+                    tooltip: 'Season Covers',
+                    onPressed: () =>
+                        _showSeasonCoverDialog(context, fileState, settings),
                     isDark: isDark,
                     iconColor: settings.accentColor,
                   ),
@@ -1393,6 +1410,71 @@ class _RenamerPageState extends State<RenamerPage> {
     fileState.updateManualMatch(index, completeResult);
   }
 
+  bool _hasSeasonGroups(FileStateService fileState) =>
+      fileState.matchResults
+          .any((r) => r.type == 'episode' && r.season != null && r.title != null);
+
+  void _showSeasonCoverDialog(
+    BuildContext context,
+    FileStateService fileState,
+    SettingsService settings,
+  ) {
+    // Group episode files by normalised (series title, season) key
+    final Map<String, _SeasonGroup> groupMap = {};
+    for (int i = 0; i < fileState.matchResults.length; i++) {
+      final r = fileState.matchResults[i];
+      if (r.type != 'episode' || r.title == null) continue;
+      final key = '${r.title!.toLowerCase().trim()}___${r.season ?? -1}';
+      groupMap.putIfAbsent(
+        key,
+        () => _SeasonGroup(
+          seriesTitle: r.title!,
+          season: r.season,
+          tmdbId: r.tmdbId,
+          fileIndices: [],
+          currentCoverBytes: r.coverBytes,
+          currentPosterUrl: r.posterUrl,
+        ),
+      );
+      groupMap[key]!.fileIndices.add(i);
+      // Capture a tmdbId from any file in the group if the first didn't have one
+      if (groupMap[key]!.tmdbId == null && r.tmdbId != null) {
+        groupMap[key]!.tmdbId = r.tmdbId;
+      }
+    }
+
+    if (groupMap.isEmpty) return;
+
+    final groups = groupMap.values.toList()
+      ..sort((a, b) {
+        final t = a.seriesTitle.compareTo(b.seriesTitle);
+        return t != 0 ? t : (a.season ?? 0).compareTo(b.season ?? 0);
+      });
+
+    showDialog(
+      context: context,
+      builder: (_) => _SeasonCoverDialog(
+        groups: groups,
+        onApply: (updated) {
+          for (final group in updated) {
+            if (group.pendingCoverBytes == null) continue;
+            for (final idx in group.fileIndices) {
+              if (idx < fileState.matchResults.length) {
+                fileState.updateManualMatch(
+                  idx,
+                  fileState.matchResults[idx].copyWith(
+                    coverBytes: group.pendingCoverBytes,
+                    clearCachedPosterPath: true,
+                  ),
+                );
+              }
+            }
+          }
+        },
+      ),
+    );
+  }
+
   /// Shows the Search All confirmation dialog.
   /// Returns confirmed titles (one per unmatched file) and the chosen provider,
   /// or null if the user cancelled.
@@ -1852,5 +1934,453 @@ class _FileBadge extends StatelessWidget {
             fontWeight: FontWeight.w500,
           ),
         ),
+      );
+}
+
+// ─── Season Cover Dialog ──────────────────────────────────────────────────────
+
+/// Mutable data holder for one series+season group inside [_SeasonCoverDialog].
+class _SeasonGroup {
+  final String seriesTitle;
+  final int? season;
+  int? tmdbId; // non-final — may be filled in from any file in the group
+  final List<int> fileIndices;
+  final Uint8List? currentCoverBytes;
+  final String? currentPosterUrl;
+  Uint8List? pendingCoverBytes; // null = no change chosen yet
+  bool isLoadingAuto = false;
+
+  _SeasonGroup({
+    required this.seriesTitle,
+    required this.season,
+    required this.tmdbId,
+    required this.fileIndices,
+    this.currentCoverBytes,
+    this.currentPosterUrl,
+  });
+}
+
+class _SeasonCoverDialog extends StatefulWidget {
+  final List<_SeasonGroup> groups;
+  final void Function(List<_SeasonGroup>) onApply;
+
+  const _SeasonCoverDialog({
+    required this.groups,
+    required this.onApply,
+  });
+
+  @override
+  State<_SeasonCoverDialog> createState() => _SeasonCoverDialogState();
+}
+
+class _SeasonCoverDialogState extends State<_SeasonCoverDialog> {
+  late List<_SeasonGroup> _groups;
+
+  @override
+  void initState() {
+    super.initState();
+    _groups = widget.groups;
+  }
+
+  /// Fetches the season-specific (or show-level fallback) poster from TMDB
+  /// and stores the downloaded bytes as [group.pendingCoverBytes].
+  Future<void> _fetchAutocover(int gi) async {
+    final group = _groups[gi];
+    final settings = context.read<SettingsService>();
+    if (settings.tmdbApiKey.isEmpty) return;
+
+    setState(() => group.isLoadingAuto = true);
+
+    try {
+      final tmdb = TmdbService(settings.tmdbApiKey);
+
+      // Resolve tvId — prefer stored tmdbId, fall back to searching by title
+      int? tvId = group.tmdbId;
+      if (tvId == null) {
+        final result = await tmdb.searchTV(group.seriesTitle);
+        tvId = result?['id'] as int?;
+        if (tvId != null && mounted) group.tmdbId = tvId;
+      }
+
+      if (tvId == null) {
+        if (mounted) setState(() => group.isLoadingAuto = false);
+        return;
+      }
+
+      // Season-specific poster first, fall back to show-level poster
+      String? posterUrl;
+      if (group.season != null) {
+        posterUrl = await tmdb.getSeasonPosterUrl(tvId, group.season!);
+      }
+      posterUrl ??= (await tmdb.getTVPosters(tvId)).firstOrNull;
+
+      if (posterUrl != null && posterUrl.isNotEmpty) {
+        final response = await http.get(Uri.parse(posterUrl));
+        if (response.statusCode == 200 &&
+            response.bodyBytes.isNotEmpty &&
+            mounted) {
+          setState(() {
+            group.pendingCoverBytes = response.bodyBytes;
+            group.isLoadingAuto = false;
+          });
+          return;
+        }
+      }
+
+      if (mounted) setState(() => group.isLoadingAuto = false);
+    } catch (e) {
+      debugPrint('Season cover auto-fetch failed: $e');
+      if (mounted) setState(() => group.isLoadingAuto = false);
+    }
+  }
+
+  /// Opens [CoverPickerModal] so the user can search and pick a poster manually.
+  void _openCoverPicker(int gi) {
+    final group = _groups[gi];
+    showDialog(
+      context: context,
+      builder: (_) => CoverPickerModal(
+        posterUrls: const [],
+        initialSearchQuery: group.seriesTitle,
+        isMovie: false,
+        season: group.season,
+        onSelected: (url) async {
+          try {
+            final response = await http.get(Uri.parse(url));
+            if (response.statusCode == 200 && mounted) {
+              setState(() => group.pendingCoverBytes = response.bodyBytes);
+            }
+          } catch (e) {
+            debugPrint('Season cover download failed: $e');
+          }
+        },
+      ),
+    );
+  }
+
+  Future<void> _pickCustomImage(int gi) async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final bytes = result.files.first.bytes;
+    if (bytes != null && mounted) {
+      setState(() => _groups[gi].pendingCoverBytes = bytes);
+    }
+  }
+
+  void _apply() {
+    widget.onApply(_groups);
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+    final hasTmdb = settings.tmdbApiKey.isNotEmpty;
+    final pendingCount = _groups.where((g) => g.pendingCoverBytes != null).length;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 640),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: Row(
+                children: [
+                  Icon(Icons.photo_album_outlined,
+                      color: settings.accentColor, size: 24),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Season Covers',
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          'Set cover art per season — applies to all matching episodes',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withAlpha(140),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            // Group rows
+            Flexible(
+              child: ListView.separated(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                shrinkWrap: true,
+                itemCount: _groups.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, gi) =>
+                    _buildGroupRow(context, gi, settings, hasTmdb),
+              ),
+            ),
+            // Footer
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton.icon(
+                    onPressed: pendingCount > 0 ? _apply : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: settings.accentColor,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor:
+                          settings.accentColor.withAlpha(60),
+                      disabledForegroundColor: Colors.white.withAlpha(120),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
+                    ),
+                    icon: const Icon(Icons.check, size: 18),
+                    label: Text(
+                      pendingCount > 0
+                          ? 'Apply to $pendingCount group${pendingCount == 1 ? '' : 's'}'
+                          : 'Apply',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupRow(
+      BuildContext context, int gi, SettingsService settings, bool hasTmdb) {
+    final group = _groups[gi];
+    final seasonLabel =
+        group.season != null ? 'Season ${group.season}' : 'Unknown Season';
+    final hasNewCover = group.pendingCoverBytes != null;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context)
+            .colorScheme
+            .surfaceContainerHighest
+            .withAlpha(80),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: hasNewCover
+              ? settings.accentColor.withAlpha(140)
+              : Theme.of(context).colorScheme.outlineVariant.withAlpha(120),
+        ),
+      ),
+      padding: const EdgeInsets.all(10),
+      child: Row(
+        children: [
+          // Cover thumbnail — 2:3 aspect ratio
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: SizedBox(
+              width: 36,
+              height: 54,
+              child: _buildCoverThumb(group, settings),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Series title + season label + file badge
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  group.seriesTitle,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w500, fontSize: 13),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    Text(
+                      seasonLabel,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(140),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    _FileBadge(
+                      count: group.fileIndices.length,
+                      accentColor: settings.accentColor,
+                    ),
+                    if (hasNewCover) ...[
+                      const SizedBox(width: 6),
+                      Icon(Icons.check_circle,
+                          size: 14, color: settings.accentColor),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Auto button (TMDB only)
+          if (hasTmdb)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Tooltip(
+                message: group.season != null
+                    ? 'Fetch Season ${group.season} poster from TMDB'
+                    : 'Fetch show poster from TMDB',
+                child: Material(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(6),
+                  child: InkWell(
+                    onTap: group.isLoadingAuto ? null : () => _fetchAutocover(gi),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 7),
+                      child: group.isLoadingAuto
+                          ? SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: settings.accentColor,
+                              ),
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.auto_awesome,
+                                    size: 13,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withAlpha(180)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Auto',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withAlpha(180),
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          // Custom file button
+          Tooltip(
+            message: 'Choose image file',
+            child: Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(6),
+              child: InkWell(
+                onTap: () => _pickCustomImage(gi),
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  child: Icon(Icons.folder_open,
+                      size: 16,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withAlpha(180)),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          // Search button
+          Tooltip(
+            message: 'Search for cover art',
+            child: Material(
+              color: settings.accentColor.withAlpha(20),
+              borderRadius: BorderRadius.circular(6),
+              child: InkWell(
+                onTap: () => _openCoverPicker(gi),
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  child: Icon(Icons.search,
+                      size: 16, color: settings.accentColor),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCoverThumb(_SeasonGroup group, SettingsService settings) {
+    final bytes = group.pendingCoverBytes ?? group.currentCoverBytes;
+    if (bytes != null) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.memory(bytes, fit: BoxFit.cover),
+          // Small checkmark overlay when a new cover has been chosen
+          if (group.pendingCoverBytes != null)
+            Positioned(
+              right: 2,
+              bottom: 2,
+              child: Icon(Icons.check_circle,
+                  size: 10, color: settings.accentColor),
+            ),
+        ],
+      );
+    }
+    if (group.currentPosterUrl != null &&
+        group.currentPosterUrl!.startsWith('http')) {
+      return Image.network(
+        group.currentPosterUrl!,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _thumbPlaceholder(),
+      );
+    }
+    return _thumbPlaceholder();
+  }
+
+  Widget _thumbPlaceholder() => Container(
+        color: Colors.grey.withAlpha(40),
+        child: const Icon(Icons.tv, size: 16, color: Colors.grey),
       );
 }
