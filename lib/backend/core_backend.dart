@@ -1448,20 +1448,26 @@ class CoreBackend {
     return null;
   }
 
-  /// Remove old cover attachments from MKV file before attaching new one.
+  /// Identifies existing cover attachments in an MKV file and returns the
+  /// corresponding `--delete-attachment N` option pairs.
   ///
-  /// [removeAllImages] — when true, every attachment whose MIME type starts with
-  /// `image/` is deleted (covers all naming conventions).  When false, only
-  /// attachments whose filename contains the word "cover" are removed
-  /// (case-insensitive, so Cover.jpg / COVER.JPG are caught too).
+  /// [removeAllImages] — when true, every attachment whose MIME type starts
+  /// with `image/` is targeted.  When false, only attachments whose filename
+  /// contains "cover" (case-insensitive) are targeted.
   /// Non-image attachments (fonts, subtitles, chapters) are never touched.
-  static Future<void> _removeOldCoversFromMkv(
+  ///
+  /// This method does NOT modify the file.  The returned args are meant to be
+  /// merged into the caller's single combined mkvpropedit invocation so that
+  /// cover removal, tag writes, and the new cover attachment all result in one
+  /// Seekhead rebuild — preventing the metadata-inconsistency that occurs when
+  /// a separate deletion pass runs immediately before the write pass.
+  static Future<List<String>> _collectCoverDeleteArgs(
     String filePath,
     String mkvpropeditPath, {
     bool removeAllImages = false,
   }) async {
     try {
-      var identifyResult = await Process.run(
+      final identifyResult = await Process.run(
         p.join(p.dirname(mkvpropeditPath), 'mkvmerge.exe'),
         ['--identify', filePath],
         runInShell: false,
@@ -1476,7 +1482,7 @@ class CoreBackend {
           ? RegExp(r"type 'image/")
           : RegExp(r"file name '.*cover", caseSensitive: false);
 
-      List<String> deleteArgs = [filePath];
+      final deleteArgs = <String>[];
       for (final line in identifyResult.stdout.toString().split('\n')) {
         final idMatch = idPattern.firstMatch(line);
         if (idMatch == null) continue;
@@ -1485,23 +1491,26 @@ class CoreBackend {
         }
       }
 
-      if (deleteArgs.length > 1) {
-        await Process.run(mkvpropeditPath, deleteArgs, runInShell: false);
-        debugPrint('🗑️  Removed ${(deleteArgs.length - 1) ~/ 2} cover(s) from MKV');
+      if (deleteArgs.isNotEmpty) {
+        debugPrint(
+          '🗑️  Queued removal of ${deleteArgs.length ~/ 2} cover(s) in combined pass',
+        );
       }
+      return deleteArgs;
     } catch (e) {
-      debugPrint('⚠️  Error removing old covers from MKV: $e');
+      debugPrint('⚠️  Error identifying MKV covers: $e');
+      return [];
     }
   }
 
-  /// Build the base mkvpropedit args for writing XML tags and segment info.
+  /// Build the mkvpropedit option args for writing XML tags and segment info.
+  /// Does NOT include the target filePath — the caller prepends it so that
+  /// cover-delete args can also be inserted before these options in one list.
   static List<String> _buildMkvTagArgs(
-    String filePath,
     String xmlPath,
     String containerTitle,
   ) {
     return [
-      filePath,
       '--tags', 'all:$xmlPath',
       if (containerTitle.isNotEmpty) ...['--edit', 'info', '--set', 'title=$containerTitle'],
       if (containerTitle.isNotEmpty) ...['--edit', 'track:v1', '--set', 'name=$containerTitle'],
@@ -1592,12 +1601,17 @@ class CoreBackend {
       // Cover-only path: skip XML tag writing entirely.
       if (!embedFields) {
         if (!hasCover) return false;
-        await _removeOldCoversFromMkv(filePath, toolPath,
-            removeAllImages: settings?.removeAllCoversBeforeEmbed ?? false);
+        // Collect delete args and fold them into the add-attachment call so
+        // mkvpropedit rebuilds the Seekhead exactly once for both operations.
+        final deleteCoverArgs = await _collectCoverDeleteArgs(
+          filePath, toolPath,
+          removeAllImages: settings?.removeAllCoversBeforeEmbed ?? false,
+        );
         final result = await Process.run(
           toolPath,
           [
             filePath,
+            ...deleteCoverArgs,
             '--attachment-name', 'cover.jpg',
             '--attachment-mime-type', 'image/jpeg',
             '--add-attachment', coverPath,
@@ -1671,24 +1685,29 @@ class CoreBackend {
       );
       await File(xmlPath).writeAsString(xml.toString());
 
-      // Remove old covers before adding a new one to prevent duplicates.
-      // This must remain a separate call because we need mkvmerge to enumerate
-      // existing attachment IDs before we can issue --delete-attachment.
-      if (hasCover) await _removeOldCoversFromMkv(filePath, toolPath,
-          removeAllImages: settings?.removeAllCoversBeforeEmbed ?? false);
+      // Collect cover-delete args without touching the file yet.
+      // Merging them into the write call below means mkvpropedit performs one
+      // single Seekhead rebuild that covers the deletion, the tag write, the
+      // segment-info update, and the new attachment — eliminating the
+      // metadata-inconsistency caused by running a separate deletion pass
+      // immediately before the write pass.
+      final deleteCoverArgs = hasCover
+          ? await _collectCoverDeleteArgs(
+              filePath, toolPath,
+              removeAllImages: settings?.removeAllCoversBeforeEmbed ?? false,
+            )
+          : const <String>[];
 
-      // Single combined call: tags + segment info + cover attachment.
-      // Combining everything into one invocation ensures mkvpropedit updates
-      // the Seekhead for all new/modified elements at once, which is what
-      // makes MediaInfo find the Tags element on the first apply.
-      final args = _buildMkvTagArgs(filePath, xmlPath, containerTitle);
-      if (hasCover) {
-        args.addAll([
-          '--attachment-name', 'cover.jpg',
-          '--attachment-mime-type', 'image/jpeg',
-          '--add-attachment', coverPath,
-        ]);
-      }
+      // Single combined call: delete old covers + write tags + update segment
+      // info + attach new cover — one Seekhead rebuild for all changes.
+      final args = [
+        filePath,
+        ...deleteCoverArgs,
+        ..._buildMkvTagArgs(xmlPath, containerTitle),
+        if (hasCover) ...['--attachment-name', 'cover.jpg',
+                          '--attachment-mime-type', 'image/jpeg',
+                          '--add-attachment', coverPath],
+      ];
 
       debugPrint('Writing $tagCount tags${hasCover ? " + cover" : ""} (single pass)...');
       final result = await Process.run(toolPath, args, runInShell: false);
@@ -1723,8 +1742,14 @@ class CoreBackend {
 
     final hasCover = coverPath != null && File(coverPath).existsSync();
 
-    // Remove old covers to prevent duplicates and Windows Explorer caching issues
-    if (hasCover) await _removeOldCoversFromMp4(filePath, _ffmpegPath);
+    // Ensure _ffmpegPath is resolved before removing old covers. When AtomicParsley
+    // is the primary tool, _checkFFmpegAvailable is never called by the normal
+    // embed path, leaving _ffmpegPath null. A null path causes _removeOldCoversFromMp4
+    // to silently no-op, so AtomicParsley accumulates a new cover atom on every apply.
+    if (hasCover) {
+      if (_ffmpegPath == null) await _checkFFmpegAvailable(settings: settings);
+      await _removeOldCoversFromMp4(filePath, _ffmpegPath);
+    }
 
     List<String> args = [filePath];
 

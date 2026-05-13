@@ -244,9 +244,9 @@ class _RenamerPageState extends State<RenamerPage> {
                       }
 
                       // Show confirmation modal before searching
-                      final confirmedTitles = await _showSearchAllConfirmationModal(context, settings);
+                      final config = await _showSearchAllConfirmationModal(context, settings);
 
-                      if (confirmedTitles == null) {
+                      if (config == null) {
                         // User cancelled
                         return;
                       }
@@ -258,19 +258,20 @@ class _RenamerPageState extends State<RenamerPage> {
                         'Searching metadata for all files...',
                       );
 
-                      // Search each file using its (possibly user-edited) title
+                      // Search each file using its confirmed title and chosen provider
                       int foundCount = 0;
                       int unmatchedIdx = 0;
                       for (int i = 0; i < fileState.inputFiles.length; i++) {
                         if (!fileState.inputFiles[i].isRenamed) {
-                          final override = unmatchedIdx < confirmedTitles.length
-                              ? confirmedTitles[unmatchedIdx].trim()
+                          final override = unmatchedIdx < config.titles.length
+                              ? config.titles[unmatchedIdx].trim()
                               : null;
                           unmatchedIdx++;
                           await fileState.matchSingleFile(
                             i,
                             settings,
                             overrideTitle: (override != null && override.isNotEmpty) ? override : null,
+                            overrideSource: config.source,
                           );
 
                           // Check if metadata was found
@@ -1392,113 +1393,274 @@ class _RenamerPageState extends State<RenamerPage> {
     fileState.updateManualMatch(index, completeResult);
   }
 
-  /// Shows a confirmation modal before bulk searching all metadata.
-  /// Returns a list of (possibly user-edited) search titles — one per unmatched
-  /// file — or null if the user cancelled.
-  Future<List<String>?> _showSearchAllConfirmationModal(
+  /// Shows the Search All confirmation dialog.
+  /// Returns confirmed titles (one per unmatched file) and the chosen provider,
+  /// or null if the user cancelled.
+  Future<({List<String> titles, String source})?> _showSearchAllConfirmationModal(
     BuildContext context,
     SettingsService settings,
-  ) async {
-    final fileState = context.read<FileStateService>();
-    final unmatched = fileState.inputFiles.where((f) => !f.isRenamed).toList();
-
-    // Pre-fill one controller per file with its parsed title
-    final controllers = unmatched
-        .map((r) => TextEditingController(text: r.title ?? r.fileName))
+  ) {
+    final unmatched = context
+        .read<FileStateService>()
+        .inputFiles
+        .where((f) => !f.isRenamed)
         .toList();
+    if (unmatched.isEmpty) return Future.value(null);
 
-    final result = await showDialog<List<String>>(
+    return showDialog<({List<String> titles, String source})>(
       context: context,
-      builder: (context) => Dialog(
-        child: Container(
-          width: 520,
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
+      builder: (_) => _SearchAllConfirmationDialog(
+        unmatched: unmatched,
+        initialSource: settings.metadataSource,
+      ),
+    );
+  }
+}
+
+// ─── Search All Confirmation Dialog ──────────────────────────────────────────
+
+/// A group of files that share the same normalised title.
+/// The user edits one shared field for the whole group, or expands it to
+/// override each file individually.
+class _TitleGroup {
+  final List<int> unmatchedIndices;
+  final TextEditingController sharedController;
+  final List<TextEditingController> perFileControllers;
+  bool expanded;
+
+  _TitleGroup({
+    required this.unmatchedIndices,
+    required this.sharedController,
+    required this.perFileControllers,
+    this.expanded = false,
+  });
+
+  void dispose() {
+    sharedController.dispose();
+    for (final c in perFileControllers) {
+      c.dispose();
+    }
+  }
+
+  /// Returns the effective search title for the file at [localIndex].
+  String titleFor(int localIndex) => expanded
+      ? perFileControllers[localIndex].text.trim()
+      : sharedController.text.trim();
+}
+
+class _SearchAllConfirmationDialog extends StatefulWidget {
+  final List<MediaRecord> unmatched;
+  final String initialSource;
+
+  const _SearchAllConfirmationDialog({
+    required this.unmatched,
+    required this.initialSource,
+  });
+
+  @override
+  State<_SearchAllConfirmationDialog> createState() =>
+      _SearchAllConfirmationDialogState();
+}
+
+class _SearchAllConfirmationDialogState
+    extends State<_SearchAllConfirmationDialog> {
+  late String _source;
+  late List<_TitleGroup> _groups;
+
+  @override
+  void initState() {
+    super.initState();
+    _groups = _buildGroups(widget.unmatched);
+    // Resolve initialSource to a provider that actually has a key configured.
+    _source = _resolveSource(
+      widget.initialSource,
+      context.read<SettingsService>(),
+    );
+  }
+
+  @override
+  void dispose() {
+    for (final g in _groups) {
+      g.dispose();
+    }
+    super.dispose();
+  }
+
+  /// Returns [preferred] if it has a configured key, otherwise falls back to
+  /// the first available provider.
+  static String _resolveSource(String preferred, SettingsService settings) {
+    final keys = {
+      'tmdb': settings.tmdbApiKey,
+      'omdb': settings.omdbApiKey,
+      'anidb': settings.anidbClientId,
+    };
+    if (keys[preferred]?.isNotEmpty == true) return preferred;
+    for (final e in keys.entries) {
+      if (e.value.isNotEmpty) return e.key;
+    }
+    return preferred;
+  }
+
+  /// Groups [unmatched] files by their normalised title (lowercase,
+  /// alphanumeric only) so duplicates share a single editable field.
+  static List<_TitleGroup> _buildGroups(List<MediaRecord> unmatched) {
+    final Map<String, List<int>> byKey = {};
+    for (int i = 0; i < unmatched.length; i++) {
+      final raw = unmatched[i].title ?? unmatched[i].fileName;
+      final key = raw.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      byKey.putIfAbsent(key, () => []).add(i);
+    }
+    return byKey.entries.map((e) {
+      final indices = e.value;
+      final displayTitle =
+          unmatched[indices.first].title ?? unmatched[indices.first].fileName;
+      return _TitleGroup(
+        unmatchedIndices: indices,
+        sharedController: TextEditingController(text: displayTitle),
+        perFileControllers: indices
+            .map((i) => TextEditingController(
+                  text: unmatched[i].title ?? unmatched[i].fileName,
+                ))
+            .toList(),
+      );
+    }).toList();
+  }
+
+  /// Flattens groups back to a per-file titles list aligned to [widget.unmatched].
+  List<String> _buildTitlesList() {
+    final result = List<String>.filled(widget.unmatched.length, '');
+    for (final group in _groups) {
+      for (int j = 0; j < group.unmatchedIndices.length; j++) {
+        result[group.unmatchedIndices[j]] = group.titleFor(j);
+      }
+    }
+    return result;
+  }
+
+  /// Expands a group: seeds each per-file controller from the current shared
+  /// value so the user only needs to edit the files that differ.
+  void _expandGroup(int gi) {
+    final group = _groups[gi];
+    final sharedValue = group.sharedController.text;
+    for (final c in group.perFileControllers) {
+      c.text = sharedValue;
+    }
+    setState(() => group.expanded = true);
+  }
+
+  void _submit() => Navigator.pop(
+        context,
+        (titles: _buildTitlesList(), source: _source),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsService>();
+    final fileCount = widget.unmatched.length;
+    final groupCount = _groups.length;
+
+    final providerItems = <DropdownMenuItem<String>>[
+      if (settings.tmdbApiKey.isNotEmpty)
+        const DropdownMenuItem(value: 'tmdb', child: Text('TMDB')),
+      if (settings.omdbApiKey.isNotEmpty)
+        const DropdownMenuItem(value: 'omdb', child: Text('OMDb')),
+      if (settings.anidbClientId.isNotEmpty)
+        const DropdownMenuItem(value: 'anidb', child: Text('AniDB')),
+    ];
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 580, maxHeight: 680),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Header ──────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.cloud_download_outlined, color: settings.accentColor, size: 28),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Search All Metadata',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
+                  Row(
+                    children: [
+                      Icon(Icons.cloud_download_outlined,
+                          color: settings.accentColor, size: 24),
+                      const SizedBox(width: 10),
+                      const Text(
+                        'Search All Metadata',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
+                  const SizedBox(height: 12),
+                  // Provider picker + summary
+                  Row(
+                    children: [
+                      if (providerItems.isNotEmpty) ...[
+                        Container(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 8),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: DropdownButton<String>(
+                            value: _source,
+                            underline: const SizedBox(),
+                            icon: const Icon(Icons.arrow_drop_down,
+                                size: 20),
+                            items: providerItems,
+                            onChanged: (v) {
+                              if (v != null) setState(() => _source = v);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                      Text(
+                        groupCount < fileCount
+                            ? '$groupCount group${groupCount == 1 ? '' : 's'} · $fileCount file${fileCount == 1 ? '' : 's'}'
+                            : '$fileCount file${fileCount == 1 ? '' : 's'}',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withAlpha(160),
+                            ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              Text(
-                'Edit any title before searching. Each file is searched independently.',
-                style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 4),
+            // ── Groups list ──────────────────────────────────────────────────
+            Flexible(
+              child: ListView.separated(
+                padding: const EdgeInsets.all(12),
+                shrinkWrap: true,
+                itemCount: _groups.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, gi) =>
+                    _buildGroupTile(context, gi, settings),
               ),
-              const SizedBox(height: 16),
-
-              // Editable file list
-              if (unmatched.isNotEmpty) ...[
-                Text(
-                  '${unmatched.length} file${unmatched.length > 1 ? 's' : ''} to search:',
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: 8),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 240),
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: unmatched.length,
-                    itemBuilder: (context, i) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.movie_outlined,
-                              size: 16,
-                              color: Theme.of(context).colorScheme.onSurface.withAlpha(100),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: TextField(
-                                controller: controllers[i],
-                                style: Theme.of(context).textTheme.bodySmall,
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 8,
-                                  ),
-                                  hintText: unmatched[i].fileName,
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                    borderSide: BorderSide(
-                                      color: settings.accentColor,
-                                      width: 1.5,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // Buttons
-              Row(
+            ),
+            // ── Footer ───────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
@@ -1507,29 +1669,188 @@ class _RenamerPageState extends State<RenamerPage> {
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton.icon(
-                    onPressed: () => Navigator.pop(
-                      context,
-                      controllers.map((c) => c.text).toList(),
-                    ),
+                    onPressed: _submit,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: settings.accentColor,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
                     ),
-                    icon: const Icon(Icons.search),
-                    label: const Text('Search All'),
+                    icon: const Icon(Icons.search, size: 18),
+                    label: Text(
+                        'Search $fileCount file${fileCount == 1 ? '' : 's'}'),
                   ),
                 ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
-
-    for (final c in controllers) {
-      c.dispose();
-    }
-    return result;
   }
+
+  Widget _buildGroupTile(
+      BuildContext context, int gi, SettingsService settings) {
+    final group = _groups[gi];
+    final isMulti = group.unmatchedIndices.length > 1;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context)
+            .colorScheme
+            .surfaceContainerHighest
+            .withAlpha(80),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Theme.of(context)
+              .colorScheme
+              .outlineVariant
+              .withAlpha(120),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Shared title row
+          Row(
+            children: [
+              Icon(
+                Icons.movie_outlined,
+                size: 15,
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withAlpha(120),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: group.sharedController,
+                  enabled: !group.expanded,
+                  style: Theme.of(context).textTheme.bodySmall,
+                  decoration: _inputDecoration(
+                    context,
+                    settings,
+                    hint: widget
+                        .unmatched[group.unmatchedIndices.first].fileName,
+                  ),
+                ),
+              ),
+              if (isMulti) ...[
+                const SizedBox(width: 8),
+                _FileBadge(
+                  count: group.unmatchedIndices.length,
+                  accentColor: settings.accentColor,
+                ),
+                IconButton(
+                  icon: Icon(
+                    group.expanded
+                        ? Icons.expand_less
+                        : Icons.expand_more,
+                    size: 18,
+                  ),
+                  onPressed: () => group.expanded
+                      ? setState(() => group.expanded = false)
+                      : _expandGroup(gi),
+                  tooltip: group.expanded
+                      ? 'Use shared title'
+                      : 'Edit individually',
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ],
+          ),
+          // Per-file overrides (visible only when expanded)
+          if (isMulti && group.expanded)
+            ...List.generate(group.unmatchedIndices.length, (j) {
+              final fileIdx = group.unmatchedIndices[j];
+              return Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 20),
+                    Icon(
+                      Icons.subdirectory_arrow_right,
+                      size: 14,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withAlpha(100),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: group.perFileControllers[j],
+                        style: Theme.of(context).textTheme.bodySmall,
+                        decoration: _inputDecoration(
+                          context,
+                          settings,
+                          hint: widget.unmatched[fileIdx].fileName,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration(
+    BuildContext context,
+    SettingsService settings, {
+    required String hint,
+  }) =>
+      InputDecoration(
+        isDense: true,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        hintText: hint,
+        hintStyle: TextStyle(
+          fontSize: 11,
+          color: Theme.of(context).colorScheme.onSurface.withAlpha(80),
+        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: BorderSide(color: settings.accentColor, width: 1.5),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: BorderSide(
+            color: Theme.of(context).colorScheme.outline.withAlpha(60),
+          ),
+        ),
+      );
+}
+
+/// Small accent-coloured badge showing the number of files in a group.
+class _FileBadge extends StatelessWidget {
+  final int count;
+  final Color accentColor;
+
+  const _FileBadge({required this.count, required this.accentColor});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.only(right: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: accentColor.withAlpha(30),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: accentColor.withAlpha(80)),
+        ),
+        child: Text(
+          '$count files',
+          style: TextStyle(
+            fontSize: 11,
+            color: accentColor,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
 }

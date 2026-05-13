@@ -5,6 +5,8 @@ import '../backend/match_result.dart';
 import '../backend/core_backend.dart';
 import '../services/settings_service.dart';
 import '../services/tmdb_service.dart';
+import '../services/omdb_service.dart';
+import '../services/anidb_service.dart';
 
 /// Modal for selecting alternative cover art with search capability
 class CoverPickerModal extends StatefulWidget {
@@ -30,6 +32,7 @@ class CoverPickerModal extends StatefulWidget {
 class _CoverPickerModalState extends State<CoverPickerModal> {
   late TextEditingController _searchController;
   late List<String> _currentPosters;
+  late String _selectedSource;
   bool _isSearching = false;
 
   @override
@@ -38,6 +41,7 @@ class _CoverPickerModalState extends State<CoverPickerModal> {
     _searchController =
         TextEditingController(text: widget.initialSearchQuery ?? '');
     _currentPosters = List.from(widget.posterUrls);
+    _selectedSource = _resolveSource(context.read<SettingsService>());
   }
 
   @override
@@ -46,29 +50,64 @@ class _CoverPickerModalState extends State<CoverPickerModal> {
     super.dispose();
   }
 
+  static String _resolveSource(SettingsService settings) {
+    final preferred = settings.metadataSource;
+    final keys = {
+      'tmdb': settings.tmdbApiKey,
+      'omdb': settings.omdbApiKey,
+      'anidb': settings.anidbClientId,
+    };
+    if (keys[preferred]?.isNotEmpty == true) return preferred;
+    for (final e in keys.entries) {
+      if (e.value.isNotEmpty) return e.key;
+    }
+    return preferred;
+  }
+
   Future<void> _searchPosters() async {
     final query = _searchController.text.trim();
     if (query.isEmpty) return;
 
     final settings = context.read<SettingsService>();
-    if (settings.tmdbApiKey.isEmpty) return;
+    final apiKey = _selectedSource == 'tmdb'
+        ? settings.tmdbApiKey
+        : _selectedSource == 'omdb'
+            ? settings.omdbApiKey
+            : settings.anidbClientId;
+    if (apiKey.isEmpty) return;
 
     setState(() => _isSearching = true);
 
     try {
-      final tmdb = TmdbService(settings.tmdbApiKey);
       List<String> posters = [];
 
-      if (widget.isMovie) {
-        final result = await tmdb.searchMovie(query, null);
-        if (result != null) {
-          posters = await tmdb.getMoviePosters(result['id'] as int);
+      if (_selectedSource == 'tmdb') {
+        final tmdb = TmdbService(apiKey);
+        if (widget.isMovie) {
+          final result = await tmdb.searchMovie(query, null);
+          if (result != null) posters = await tmdb.getMoviePosters(result['id'] as int);
+        } else {
+          final result = await tmdb.searchTV(query);
+          if (result != null) posters = await tmdb.getTVPosters(result['id'] as int);
         }
-      } else {
-        final result = await tmdb.searchTV(query);
-        if (result != null) {
-          posters = await tmdb.getTVPosters(result['id'] as int);
-        }
+      } else if (_selectedSource == 'omdb') {
+        final omdb = OmdbService(apiKey);
+        final results = widget.isMovie
+            ? await omdb.searchMovieAll(query, null)
+            : await omdb.searchSeriesAll(query);
+        posters = results
+            .map((r) => r['Poster'] as String?)
+            .where((p) => p != null && p != 'N/A')
+            .cast<String>()
+            .toList();
+      } else if (_selectedSource == 'anidb') {
+        final anidb = AnidbService(apiKey);
+        final results = await anidb.searchAnimeAll(query);
+        posters = results
+            .map((r) => r['poster_url'] as String?)
+            .where((p) => p != null && p.isNotEmpty)
+            .cast<String>()
+            .toList();
       }
 
       if (mounted) {
@@ -86,6 +125,15 @@ class _CoverPickerModalState extends State<CoverPickerModal> {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
+
+    final providerItems = <DropdownMenuItem<String>>[
+      if (settings.tmdbApiKey.isNotEmpty)
+        const DropdownMenuItem(value: 'tmdb', child: Text('TMDB')),
+      if (settings.omdbApiKey.isNotEmpty)
+        const DropdownMenuItem(value: 'omdb', child: Text('OMDb')),
+      if (settings.anidbClientId.isNotEmpty)
+        const DropdownMenuItem(value: 'anidb', child: Text('AniDB')),
+    ];
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -116,9 +164,35 @@ class _CoverPickerModalState extends State<CoverPickerModal> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  // Search bar
+                  // Search bar with provider dropdown
                   Row(
                     children: [
+                      if (providerItems.isNotEmpty) ...[
+                        Container(
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 8),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: DropdownButton<String>(
+                            value: _selectedSource,
+                            underline: const SizedBox(),
+                            icon: const Icon(Icons.arrow_drop_down,
+                                size: 20),
+                            items: providerItems,
+                            onChanged: (v) {
+                              if (v != null && v != _selectedSource) {
+                                setState(() => _selectedSource = v);
+                                _searchPosters();
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                      ],
                       Expanded(
                         child: TextField(
                           controller: _searchController,

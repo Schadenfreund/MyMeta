@@ -5,6 +5,17 @@ All notable changes to MyMeta will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2026-05-14
+
+### Added
+
+- **Provider Selection in Cover Art Modal** — The "Select Cover Art" gallery modal now includes the same provider dropdown (TMDB / OMDb / AniDB) found in the other search modals. TMDB returns a full poster gallery; OMDb and AniDB return the poster image from each search result. Defaults to the last-used metadata source and auto-searches when the provider is changed.
+- **Grouped Titles in Search All Metadata** — Files with the same parsed title are now grouped under a single shared text field instead of showing one field per file. Editing the shared field updates the search query for the whole group. Expanding a group reveals per-file overrides (seeded from the shared value) for cases where individual files need different titles. A badge shows the file count per group.
+
+### Changed
+
+- **Modal Style Consistency** — Full pass across all three search/picker modals (Select Cover Art, Select Match, Search All Metadata): unified close-button sizing, consistent header/search-bar layout, and matching separator treatment between sections.
+
 ## [1.1.5] - 2026-05-02
 
 ### Added

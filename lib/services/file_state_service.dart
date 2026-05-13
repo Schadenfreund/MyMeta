@@ -107,6 +107,7 @@ class FileStateService with ChangeNotifier {
     String? overrideTitle,
     int? overrideSeason,
     int? overrideEpisode,
+    String? overrideSource,
   }) async {
     if (index < 0 || index >= _inputFiles.length) return;
 
@@ -151,7 +152,7 @@ class FileStateService with ChangeNotifier {
         tmdbApiKey: settings.tmdbApiKey,
         omdbApiKey: settings.omdbApiKey,
         anidbClientId: settings.anidbClientId,
-        metadataSource: settings.metadataSource,
+        metadataSource: overrideSource ?? settings.metadataSource,
         useSeasonPoster: settings.useSeasonPoster,
         episodeDigits: settings.episodeDigits,
         seasonDigits: settings.seasonDigits,
