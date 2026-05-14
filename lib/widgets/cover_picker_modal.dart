@@ -8,6 +8,51 @@ import '../services/tmdb_service.dart';
 import '../services/omdb_service.dart';
 import '../services/anidb_service.dart';
 
+/// Shared provider dropdown used by all search/picker modals.
+/// Shows only providers that have a configured API key.
+/// Returns [SizedBox.shrink] when no keys are configured.
+class ProviderDropdown extends StatelessWidget {
+  final String value;
+  final SettingsService settings;
+  final ValueChanged<String> onChanged;
+
+  const ProviderDropdown({
+    super.key,
+    required this.value,
+    required this.settings,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <DropdownMenuItem<String>>[
+      if (settings.tmdbApiKey.isNotEmpty)
+        const DropdownMenuItem(value: 'tmdb', child: Text('TMDB')),
+      if (settings.omdbApiKey.isNotEmpty)
+        const DropdownMenuItem(value: 'omdb', child: Text('OMDb')),
+      if (settings.anidbClientId.isNotEmpty)
+        const DropdownMenuItem(value: 'anidb', child: Text('AniDB')),
+    ];
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: DropdownButton<String>(
+        value: value,
+        underline: const SizedBox(),
+        icon: const Icon(Icons.arrow_drop_down, size: 20),
+        items: items,
+        onChanged: (v) {
+          if (v != null && v != value) onChanged(v);
+        },
+      ),
+    );
+  }
+}
+
 /// Modal for selecting alternative cover art with search capability
 class CoverPickerModal extends StatefulWidget {
   final List<String> posterUrls;
@@ -43,27 +88,15 @@ class _CoverPickerModalState extends State<CoverPickerModal> {
     _searchController =
         TextEditingController(text: widget.initialSearchQuery ?? '');
     _currentPosters = List.from(widget.posterUrls);
-    _selectedSource = _resolveSource(context.read<SettingsService>());
+    final settings = context.read<SettingsService>();
+    _selectedSource =
+        SettingsService.resolveMetadataSource(settings.metadataSource, settings);
   }
 
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
-  }
-
-  static String _resolveSource(SettingsService settings) {
-    final preferred = settings.metadataSource;
-    final keys = {
-      'tmdb': settings.tmdbApiKey,
-      'omdb': settings.omdbApiKey,
-      'anidb': settings.anidbClientId,
-    };
-    if (keys[preferred]?.isNotEmpty == true) return preferred;
-    for (final e in keys.entries) {
-      if (e.value.isNotEmpty) return e.key;
-    }
-    return preferred;
   }
 
   Future<void> _searchPosters() async {
@@ -137,14 +170,6 @@ class _CoverPickerModalState extends State<CoverPickerModal> {
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
 
-    final providerItems = <DropdownMenuItem<String>>[
-      if (settings.tmdbApiKey.isNotEmpty)
-        const DropdownMenuItem(value: 'tmdb', child: Text('TMDB')),
-      if (settings.omdbApiKey.isNotEmpty)
-        const DropdownMenuItem(value: 'omdb', child: Text('OMDb')),
-      if (settings.anidbClientId.isNotEmpty)
-        const DropdownMenuItem(value: 'anidb', child: Text('AniDB')),
-    ];
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -178,29 +203,14 @@ class _CoverPickerModalState extends State<CoverPickerModal> {
                   // Search bar with provider dropdown
                   Row(
                     children: [
-                      if (providerItems.isNotEmpty) ...[
-                        Container(
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 8),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: DropdownButton<String>(
-                            value: _selectedSource,
-                            underline: const SizedBox(),
-                            icon: const Icon(Icons.arrow_drop_down,
-                                size: 20),
-                            items: providerItems,
-                            onChanged: (v) {
-                              if (v != null && v != _selectedSource) {
-                                setState(() => _selectedSource = v);
-                                _searchPosters();
-                              }
-                            },
-                          ),
+                      if (settings.hasAnyMetadataKey) ...[
+                        ProviderDropdown(
+                          value: _selectedSource,
+                          settings: settings,
+                          onChanged: (v) {
+                            setState(() => _selectedSource = v);
+                            _searchPosters();
+                          },
                         ),
                         const SizedBox(width: 10),
                       ],
@@ -493,49 +503,15 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
                   Row(
                     children: [
                       // Source dropdown (compact)
-                      Consumer<SettingsService>(
-                        builder: (context, settings, _) {
-                          final items = <DropdownMenuItem<String>>[];
-                          if (settings.tmdbApiKey.isNotEmpty) {
-                            items.add(const DropdownMenuItem(
-                                value: 'tmdb', child: Text('TMDB')));
-                          }
-                          if (settings.omdbApiKey.isNotEmpty) {
-                            items.add(const DropdownMenuItem(
-                                value: 'omdb', child: Text('OMDb')));
-                          }
-                          if (settings.anidbClientId.isNotEmpty) {
-                            items.add(const DropdownMenuItem(
-                                value: 'anidb', child: Text('AniDB')));
-                          }
-                          if (items.isEmpty) {
-                            return const SizedBox.shrink();
-                          }
-                          return Container(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 8),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: DropdownButton<String>(
-                              value: _selectedSource,
-                              underline: const SizedBox(),
-                              icon: const Icon(Icons.arrow_drop_down,
-                                  size: 20),
-                              items: items,
-                              onChanged: (v) {
-                                if (v != null && v != _selectedSource) {
-                                  setState(() => _selectedSource = v);
-                                  _performSearch();
-                                }
-                              },
-                            ),
-                          );
-                        },
-                      ),
+                      if (settings.hasAnyMetadataKey)
+                        ProviderDropdown(
+                          value: _selectedSource,
+                          settings: settings,
+                          onChanged: (v) {
+                            setState(() => _selectedSource = v);
+                            _performSearch();
+                          },
+                        ),
                       const SizedBox(width: 10),
                       // Search text field
                       Expanded(
@@ -576,7 +552,7 @@ class _SearchResultsPickerModalState extends State<SearchResultsPickerModal> {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
+                        color: Colors.red.withAlpha(26),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Row(

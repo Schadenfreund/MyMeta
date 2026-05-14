@@ -61,6 +61,19 @@ class SettingsService with ChangeNotifier {
   String get omdbApiKey => _omdbApiKey;
   String get anidbClientId => _anidbClientId;
   String get metadataSource => _metadataSource;
+  bool get hasAnyMetadataKey =>
+      _tmdbApiKey.isNotEmpty || _omdbApiKey.isNotEmpty || _anidbClientId.isNotEmpty;
+
+  /// Returns [preferred] if it has a configured API key, otherwise returns
+  /// the first provider that does. Falls back to [preferred] if none are set.
+  static String resolveMetadataSource(String preferred, SettingsService s) {
+    final keys = {'tmdb': s._tmdbApiKey, 'omdb': s._omdbApiKey, 'anidb': s._anidbClientId};
+    if (keys[preferred]?.isNotEmpty == true) return preferred;
+    for (final e in keys.entries) {
+      if (e.value.isNotEmpty) return e.key;
+    }
+    return preferred;
+  }
   Color get accentColor => _accentColor;
   String get ffmpegPath => _ffmpegPath;
   String get mkvpropeditPath => _mkvpropeditPath;

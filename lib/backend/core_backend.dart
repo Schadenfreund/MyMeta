@@ -1796,72 +1796,14 @@ class CoreBackend {
     // Overwrite in place
     args.add('--overWrite');
 
-    // DEBUG: Log exact command and arguments
-    debugPrint('🔧 ATOMICPARSLEY COMMAND:');
-    debugPrint('   Tool: $toolPath');
-    debugPrint('   File: $filePath');
-    debugPrint('   Args: ${args.join(' | ')}');
-    debugPrint('   Full: "$toolPath" ${args.map((a) => '"$a"').join(' ')}');
-
-    // Check file before
-    File targetFile = File(filePath);
-    DateTime beforeTime = targetFile.lastModifiedSync();
-    int beforeSize = targetFile.lengthSync();
-    debugPrint(
-      '📊 BEFORE: Modified=${beforeTime.toIso8601String()}, Size=$beforeSize',
-    );
-
     try {
-      // Use runInShell: false to avoid path quoting issues with spaces
       var result = await Process.run(toolPath, args, runInShell: false);
-
-      debugPrint('📤 Exit Code: ${result.exitCode}');
-
-      // ALWAYS log stdout and stderr
-      String stdout = result.stdout.toString().trim();
-      String stderr = result.stderr.toString().trim();
-
-      if (stdout.isNotEmpty) {
-        debugPrint('📄 STDOUT:');
-        debugPrint(stdout);
-      }
-
-      if (stderr.isNotEmpty) {
-        debugPrint('⚠️  STDERR:');
-        debugPrint(stderr);
-      }
-
-      // Wait for file system to sync
-      await Future.delayed(Duration(milliseconds: 500));
-
-      // Check file after
-      if (targetFile.existsSync()) {
-        DateTime afterTime = targetFile.lastModifiedSync();
-        int afterSize = targetFile.lengthSync();
-        debugPrint(
-          '📊 AFTER: Modified=${afterTime.toIso8601String()}, Size=$afterSize',
-        );
-
-        bool timeChanged = afterTime.isAfter(beforeTime);
-        bool sizeChanged = afterSize != beforeSize;
-
-        debugPrint('   Time changed: $timeChanged');
-        debugPrint('   Size changed: $sizeChanged');
-
-        if (!timeChanged && !sizeChanged) {
-          debugPrint(
-            '❌ FILE NOT MODIFIED - AtomicParsley did NOT write metadata!',
-          );
-          debugPrint('   This means the command failed silently');
-          return false;
-        }
-      }
 
       if (result.exitCode == 0) {
         debugPrint('✅ MP4 metadata embedded with AtomicParsley');
         return true;
       } else {
-        debugPrint('❌ AtomicParsley failed (exit ${result.exitCode})');
+        debugPrint('❌ AtomicParsley failed (exit ${result.exitCode}): ${result.stderr}');
         return false;
       }
     } catch (e) {

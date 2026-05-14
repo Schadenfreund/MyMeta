@@ -158,6 +158,7 @@ class TmdbService {
     final sorted = posters.where((p) => p['file_path'] != null).toList()
       ..sort((a, b) => (b['vote_count'] ?? 0).compareTo(a['vote_count'] ?? 0));
     return sorted
+        .take(9)
         .map((p) =>
             '${ImageConfig.tmdbImageBaseUrl}${ImageConfig.tmdbPosterSize}${p['file_path']}')
         .toList();

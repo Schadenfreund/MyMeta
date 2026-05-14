@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:desktop_drop/desktop_drop.dart';
@@ -370,10 +371,23 @@ class _RenamerPageState extends State<RenamerPage> {
                     context,
                     icon: Icons.check,
                     tooltip: _applyTooltip(settings),
-                    onPressed: () {
+                    onPressed: () async {
                       setState(() => _expandedIndex = null);
                       final settings = context.read<SettingsService>();
-                      fileState.renameFiles(settings: settings);
+                      final tvCount = fileState.matchResults
+                          .where((r) => r.type == 'episode')
+                          .length;
+                      final movieCount = fileState.matchResults
+                          .where((r) => r.type == 'movie')
+                          .length;
+                      await fileState.renameFiles(settings: settings);
+                      if (!context.mounted) return;
+                      if (tvCount > 0) {
+                        await settings.incrementTvShowMatches(tvCount);
+                      }
+                      if (movieCount > 0) {
+                        await settings.incrementMovieMatches(movieCount);
+                      }
                     },
                     isDark: isDark,
                     isPrimary: false,
@@ -914,21 +928,23 @@ class _RenamerPageState extends State<RenamerPage> {
                 _showSearchModal(context, index, input, fileState, settings);
               },
               onRename: (MatchResult result) async {
-                // Update the match result and apply to file
                 fileState.updateManualMatch(index, result);
-                // Then rename
                 final settings = context.read<SettingsService>();
                 final success =
                     await fileState.renameSingleFile(index, settings: settings);
-                if (context.mounted) {
-                  _toggleExpanded(index);
-                  if (success) {
-                    SnackbarHelper.showSuccess(
-                        context, 'File renamed successfully!');
-                  } else {
-                    SnackbarHelper.showError(context,
-                        'Failed to rename file. Check console for details.');
+                if (!context.mounted) return;
+                _toggleExpanded(index);
+                if (success) {
+                  if (result.type == 'episode') {
+                    unawaited(settings.incrementTvShowMatches(1));
+                  } else if (result.type == 'movie') {
+                    unawaited(settings.incrementMovieMatches(1));
                   }
+                  SnackbarHelper.showSuccess(
+                      context, 'File renamed successfully!');
+                } else {
+                  SnackbarHelper.showError(context,
+                      'Failed to rename file. Check console for details.');
                 }
               },
             ),
@@ -1554,7 +1570,7 @@ class _SearchAllConfirmationDialogState
     super.initState();
     _groups = _buildGroups(widget.unmatched);
     // Resolve initialSource to a provider that actually has a key configured.
-    _source = _resolveSource(
+    _source = SettingsService.resolveMetadataSource(
       widget.initialSource,
       context.read<SettingsService>(),
     );
@@ -1570,18 +1586,6 @@ class _SearchAllConfirmationDialogState
 
   /// Returns [preferred] if it has a configured key, otherwise falls back to
   /// the first available provider.
-  static String _resolveSource(String preferred, SettingsService settings) {
-    final keys = {
-      'tmdb': settings.tmdbApiKey,
-      'omdb': settings.omdbApiKey,
-      'anidb': settings.anidbClientId,
-    };
-    if (keys[preferred]?.isNotEmpty == true) return preferred;
-    for (final e in keys.entries) {
-      if (e.value.isNotEmpty) return e.key;
-    }
-    return preferred;
-  }
 
   /// Groups [unmatched] files by their normalised title (lowercase,
   /// alphanumeric only) so duplicates share a single editable field.
@@ -1641,15 +1645,6 @@ class _SearchAllConfirmationDialogState
     final fileCount = widget.unmatched.length;
     final groupCount = _groups.length;
 
-    final providerItems = <DropdownMenuItem<String>>[
-      if (settings.tmdbApiKey.isNotEmpty)
-        const DropdownMenuItem(value: 'tmdb', child: Text('TMDB')),
-      if (settings.omdbApiKey.isNotEmpty)
-        const DropdownMenuItem(value: 'omdb', child: Text('OMDb')),
-      if (settings.anidbClientId.isNotEmpty)
-        const DropdownMenuItem(value: 'anidb', child: Text('AniDB')),
-    ];
-
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Container(
@@ -1685,26 +1680,11 @@ class _SearchAllConfirmationDialogState
                   // Provider picker + summary
                   Row(
                     children: [
-                      if (providerItems.isNotEmpty) ...[
-                        Container(
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 8),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: DropdownButton<String>(
-                            value: _source,
-                            underline: const SizedBox(),
-                            icon: const Icon(Icons.arrow_drop_down,
-                                size: 20),
-                            items: providerItems,
-                            onChanged: (v) {
-                              if (v != null) setState(() => _source = v);
-                            },
-                          ),
+                      if (settings.hasAnyMetadataKey) ...[
+                        ProviderDropdown(
+                          value: _source,
+                          settings: settings,
+                          onChanged: (v) => setState(() => _source = v),
                         ),
                         const SizedBox(width: 12),
                       ],
@@ -1975,6 +1955,7 @@ class _SeasonCoverDialog extends StatefulWidget {
 
 class _SeasonCoverDialogState extends State<_SeasonCoverDialog> {
   late List<_SeasonGroup> _groups;
+  bool _seasonSpecific = true;
 
   @override
   void initState() {
@@ -2007,9 +1988,9 @@ class _SeasonCoverDialogState extends State<_SeasonCoverDialog> {
         return;
       }
 
-      // Season-specific poster first, fall back to show-level poster
+      // Season-specific poster first (when toggle is on), fall back to show-level
       String? posterUrl;
-      if (group.season != null) {
+      if (_seasonSpecific && group.season != null) {
         posterUrl = await tmdb.getSeasonPosterUrl(tvId, group.season!);
       }
       posterUrl ??= (await tmdb.getTVPosters(tvId)).firstOrNull;
@@ -2043,7 +2024,7 @@ class _SeasonCoverDialogState extends State<_SeasonCoverDialog> {
         posterUrls: const [],
         initialSearchQuery: group.seriesTitle,
         isMovie: false,
-        season: group.season,
+        season: _seasonSpecific ? group.season : null,
         onSelected: (url) async {
           try {
             final response = await http.get(Uri.parse(url));
@@ -2092,36 +2073,64 @@ class _SeasonCoverDialogState extends State<_SeasonCoverDialog> {
             // Header
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Icon(Icons.photo_album_outlined,
-                      color: settings.accentColor, size: 24),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Season Covers',
-                          style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold),
+                  Row(
+                    children: [
+                      Icon(Icons.photo_album_outlined,
+                          color: settings.accentColor, size: 24),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Season Covers',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              'Set cover art per season — applies to all matching episodes',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withAlpha(140),
+                              ),
+                            ),
+                          ],
                         ),
-                        Text(
-                          'Set cover art per season — applies to all matching episodes',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withAlpha(140),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
+                  const SizedBox(height: 10),
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(
+                        value: true,
+                        label: Text('Season'),
+                        icon: Icon(Icons.photo_album_outlined, size: 14),
+                      ),
+                      ButtonSegment(
+                        value: false,
+                        label: Text('Show'),
+                        icon: Icon(Icons.tv, size: 14),
+                      ),
+                    ],
+                    selected: {_seasonSpecific},
+                    onSelectionChanged: (s) =>
+                        setState(() => _seasonSpecific = s.first),
+                    style: ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      textStyle: WidgetStateProperty.all(
+                          const TextStyle(fontSize: 12)),
+                    ),
                   ),
                 ],
               ),

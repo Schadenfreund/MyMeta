@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Season Covers** — New toolbar button (photo album icon) opens a Season Covers dialog when TV episode files are loaded. Files are grouped by series + season. Each row shows the current cover thumbnail, an Auto button that fetches the season-specific poster from TMDB (falling back to the show-level poster), and a Search button that opens the full cover picker. Confirming applies the chosen cover bytes to every episode in each group.
+- **Season Covers** — New toolbar button (photo album icon) opens a Season Covers dialog when TV episode files are loaded. Files are grouped by series + season. Each row shows the current cover thumbnail, an Auto button that fetches the season-specific poster from TMDB (falling back to the show-level poster), a Search button that opens the full cover picker, and a Custom button to pick a local image file. A Season / Show toggle switches whether Auto and Search look for season-specific or show-level posters. Confirming applies the chosen cover bytes to every episode in each group.
+
+### Fixed
+
+- **Statistics Not Counting** — TV Shows Matched and Movies Matched counters in the Settings tab were only incremented when using the per-row apply button. Using Apply All or the inline metadata editor's rename action no longer silently skips the counters.
 
 ## [1.1.6] - 2026-05-14
 
