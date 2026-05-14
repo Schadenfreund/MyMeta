@@ -27,12 +27,13 @@ class RenamerPage extends StatefulWidget {
 
 class _RenamerPageState extends State<RenamerPage> {
   int? _expandedIndex;
-  final Set<int> _searchedIndices =
-      {}; // Track which items have successful metadata searches
-  final Set<int> _renamingIndices =
-      {}; // Track which items are currently being renamed
-  final Set<int> _autoMatchedIndices =
-      {}; // Track which items were auto-matched via "Search All"
+  final Set<int> _searchedIndices = {};
+  final Set<int> _renamingIndices = {};
+  final Set<int> _autoMatchedIndices = {};
+
+  bool _isSearchingAll = false;
+  int _searchProgress = 0;
+  int _searchTotal = 0;
 
   Future<void> _pickFiles(BuildContext context) async {
     // Read context values BEFORE any async operations
@@ -220,7 +221,7 @@ class _RenamerPageState extends State<RenamerPage> {
         ),
 
         // Floating Action Buttons (bottom right) - only when files exist
-        if (hasFiles && !fileState.isLoading)
+        if (hasFiles && !fileState.isLoading && !_isSearchingAll)
           Positioned(
             right: AppSpacing.md,
             bottom: AppSpacing.md,
@@ -257,12 +258,15 @@ class _RenamerPageState extends State<RenamerPage> {
 
                       setState(() => _expandedIndex = null);
 
-                      SnackbarHelper.showInfo(
-                        context,
-                        'Searching metadata for all files...',
-                      );
+                      final unmatched = fileState.inputFiles
+                          .where((f) => !f.isRenamed)
+                          .length;
+                      setState(() {
+                        _isSearchingAll = true;
+                        _searchProgress = 0;
+                        _searchTotal = unmatched;
+                      });
 
-                      // Search each file using its confirmed title and chosen provider
                       int foundCount = 0;
                       int unmatchedIdx = 0;
                       for (int i = 0; i < fileState.inputFiles.length; i++) {
@@ -274,31 +278,32 @@ class _RenamerPageState extends State<RenamerPage> {
                           await fileState.matchSingleFile(
                             i,
                             settings,
-                            overrideTitle: (override != null && override.isNotEmpty) ? override : null,
+                            overrideTitle: (override != null && override.isNotEmpty)
+                                ? override
+                                : null,
                             overrideSource: config.source,
                           );
 
-                          // Check if metadata was found
                           if (i < fileState.matchResults.length) {
                             final result = fileState.matchResults[i];
-                            if (result.title != null &&
-                                result.title!.isNotEmpty) {
+                            if (result.title != null && result.title!.isNotEmpty) {
                               foundCount++;
-                              setState(() {
-                                _searchedIndices.add(i);
-                                _autoMatchedIndices
-                                    .add(i); // Track as auto-matched
-                              });
+                              _searchedIndices.add(i);
+                              _autoMatchedIndices.add(i);
                             }
                           }
+
+                          setState(() => _searchProgress = unmatchedIdx);
                         }
                       }
+
+                      setState(() => _isSearchingAll = false);
 
                       if (context.mounted) {
                         if (foundCount > 0) {
                           SnackbarHelper.showSuccess(
                             context,
-                            'Found metadata for $foundCount file${foundCount > 1 ? 's' : ''}',
+                            'Found metadata for $foundCount file${foundCount == 1 ? '' : 's'}',
                           );
                         } else {
                           SnackbarHelper.showWarning(
@@ -412,33 +417,13 @@ class _RenamerPageState extends State<RenamerPage> {
             ),
           ),
 
-        // Processing indicator
-        if (fileState.isLoading)
+        // Progress indicator — replaces the corner spinner
+        if (fileState.isLoading || _isSearchingAll)
           Positioned(
+            left: AppSpacing.md,
             right: AppSpacing.md,
             bottom: AppSpacing.md,
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: settings.accentColor.withAlpha(100),
-                ),
-                boxShadow:
-                    isDark ? AppTheme.darkCardShadow : AppTheme.lightCardShadow,
-              ),
-              child: SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    settings.accentColor,
-                  ),
-                ),
-              ),
-            ),
+            child: _buildProgressBar(context, fileState, settings, isDark),
           ),
 
         // Loading Overlay when adding files
@@ -503,6 +488,93 @@ class _RenamerPageState extends State<RenamerPage> {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildProgressBar(
+    BuildContext context,
+    FileStateService fileState,
+    SettingsService settings,
+    bool isDark,
+  ) {
+    final isApplying = _isSearchingAll
+        ? false
+        : fileState.applyTotal > 0;
+    final double? progress;
+    final String label;
+
+    if (_isSearchingAll) {
+      label = _searchTotal > 0
+          ? 'Searching metadata ($_searchProgress / $_searchTotal)'
+          : 'Searching metadata…';
+      progress = _searchTotal > 0 ? _searchProgress / _searchTotal : null;
+    } else if (isApplying) {
+      label = 'Applying metadata '
+          '(${fileState.applyProgress} / ${fileState.applyTotal})';
+      progress = fileState.applyProgress / fileState.applyTotal;
+    } else {
+      label = 'Loading…';
+      progress = null;
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: settings.accentColor.withAlpha(80)),
+        boxShadow: isDark ? AppTheme.darkCardShadow : AppTheme.lightCardShadow,
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(settings.accentColor),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                LinearProgressIndicator(
+                  value: progress,
+                  backgroundColor: Theme.of(context)
+                      .colorScheme
+                      .surfaceContainerHighest,
+                  valueColor:
+                      AlwaysStoppedAnimation<Color>(settings.accentColor),
+                  borderRadius: BorderRadius.circular(2),
+                  minHeight: 3,
+                ),
+              ],
+            ),
+          ),
+          if (progress != null) ...[
+            const SizedBox(width: 12),
+            Text(
+              '${(progress * 100).round()}%',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: settings.accentColor,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

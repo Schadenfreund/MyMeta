@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Season Covers** — New toolbar button (photo album icon) opens a Season Covers dialog when TV episode files are loaded. Files are grouped by series + season. Each row shows the current cover thumbnail, an Auto button that fetches the season-specific poster from TMDB (falling back to the show-level poster), a Search button that opens the full cover picker, and a Custom button to pick a local image file. A Season / Show toggle switches whether Auto and Search look for season-specific or show-level posters. Confirming applies the chosen cover bytes to every episode in each group.
 
+### Changed
+
+- **Search All Performance** — API responses are now cached by URL for the duration of a session. Repeated calls for the same show (e.g. 20 episodes of one series) reuse the cached response instead of hitting the network again — typically a 5–10× reduction in API calls for a TV batch. Concurrent identical in-flight requests are also deduplicated. The cache is cleared when the file list is cleared.
+- **Apply All Performance** — File embedding now runs up to 3 files concurrently instead of sequentially. Each file's external tool call (mkvpropedit / AtomicParsley) and cover download are independent, so wall-clock time scales roughly with the slowest file in each group rather than the sum of all files.
+- **Progress Feedback** — The small corner spinner is replaced by a full-width progress bar at the bottom of the file list. Search All shows "Searching metadata (3 / 20)" with a determinate bar and percentage; Apply All shows "Applying metadata (5 / 20)" similarly. Results appear in the list as each file completes. The floating action buttons are hidden during both operations to avoid flicker.
+
 ### Fixed
 
 - **Statistics Not Counting** — TV Shows Matched and Movies Matched counters in the Settings tab were only incremented when using the per-row apply button. Using Apply All or the inline metadata editor's rename action no longer silently skips the counters.

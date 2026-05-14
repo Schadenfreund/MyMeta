@@ -6,9 +6,39 @@ import '../constants/app_constants.dart';
 
 /// HTTP client wrapper with consistent timeout handling and error management
 class ApiClient {
-  /// Make a GET request with timeout handling
-  /// Returns null on failure instead of throwing
+  // Session-scoped cache: avoids repeat API calls for the same URL within one
+  // session (e.g. show details fetched once for 20 episodes of the same series).
+  static final Map<String, Map<String, dynamic>> _cache = {};
+  static final Map<String, Future<Map<String, dynamic>?>> _inFlight = {};
+
+  /// Clears the session cache. Call when the user starts a new batch (clearAll).
+  static void clearCache() => _cache.clear();
+
+  /// Make a GET request with timeout handling.
+  /// Responses are cached by URL for the lifetime of the session.
+  /// Concurrent identical requests are deduplicated — only one HTTP call fires.
   static Future<Map<String, dynamic>?> getJson(
+    Uri uri, {
+    Duration? timeout,
+    Map<String, String>? headers,
+  }) async {
+    final key = uri.toString();
+
+    if (_cache.containsKey(key)) return _cache[key]!;
+    if (_inFlight.containsKey(key)) return _inFlight[key]!;
+
+    final future = _fetchJson(uri, timeout: timeout, headers: headers);
+    _inFlight[key] = future;
+    try {
+      final result = await future;
+      if (result != null) _cache[key] = result;
+      return result;
+    } finally {
+      _inFlight.remove(key);
+    }
+  }
+
+  static Future<Map<String, dynamic>?> _fetchJson(
     Uri uri, {
     Duration? timeout,
     Map<String, String>? headers,

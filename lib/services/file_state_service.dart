@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../backend/media_record.dart';
 import '../backend/match_result.dart';
 import '../backend/core_backend.dart';
+import '../utils/http_client.dart';
 import 'package:cross_file/cross_file.dart';
 import 'settings_service.dart';
 import 'poster_cache_service.dart';
@@ -17,6 +19,8 @@ class FileStateService with ChangeNotifier {
   bool _isLoading = false;
   bool _isAddingFiles = false;
   bool _canUndo = false;
+  int _applyProgress = 0;
+  int _applyTotal = 0;
   List<String> _lastRenamedOldPaths = [];
   List<String> _lastRenamedNewNames = [];
 
@@ -25,6 +29,8 @@ class FileStateService with ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isAddingFiles => _isAddingFiles;
   bool get canUndo => _canUndo;
+  int get applyProgress => _applyProgress;
+  int get applyTotal => _applyTotal;
 
   /// Sanitize filename by removing/replacing invalid Windows characters
   String _sanitizeFilename(String filename) {
@@ -201,15 +207,15 @@ class FileStateService with ChangeNotifier {
     if (_inputFiles.length != _matchResults.length) return;
 
     _isLoading = true;
+    _applyProgress = 0;
+    _applyTotal = _inputFiles.length;
     notifyListeners();
 
     try {
       List<String> oldPaths = _inputFiles.map((m) => m.fullFilePath).toList();
-      // Sanitize all filenames
       List<String> newNames =
           _matchResults.map((r) => _sanitizeFilename(r.newName)).toList();
 
-      // Update match results with sanitized names
       for (int i = 0; i < _matchResults.length; i++) {
         _matchResults[i].newName = newNames[i];
       }
@@ -218,126 +224,123 @@ class FileStateService with ChangeNotifier {
       final doCover       = settings?.doCover        ?? true;
       final doEmbedFields = settings?.doEmbedFields  ?? true;
 
-      // Perform Rename
       if (doRename) {
         CoreBackend.performFileRenaming(oldPaths, newNames);
       }
 
-      // Create UserData/Cache folder for temporary cover files
       final exePath = Platform.resolvedExecutable;
       final appDir = p.dirname(exePath);
       final cacheDir = Directory(p.join(appDir, 'UserData', 'Cache'));
-
-      // Create cache directory if it doesn't exist
       if (!cacheDir.existsSync()) {
         cacheDir.createSync(recursive: true);
-        debugPrint("📁 Created cache directory: ${cacheDir.path}");
       }
 
-      // Download, resize, cache and Embed Posters
-      for (int i = 0; i < _inputFiles.length; i++) {
-        String parentDir = p.dirname(oldPaths[i]);
-        String newName = newNames[i];
-        // When not renaming the file stays at its original path
-        String newFullPath = doRename
-            ? p.join(parentDir, newName)
-            : oldPaths[i];
+      // Process up to 3 files concurrently — each file runs an independent
+      // external process (mkvpropedit / AtomicParsley) with a unique temp path.
+      int nextIndex = 0;
 
-        // Skip embedding entirely when both cover and field writing are disabled
-        if (!doCover && !doEmbedFields) {
-          _inputFiles[i].renamedPath = newFullPath;
-          continue;
-        }
+      Future<void> worker() async {
+        while (true) {
+          final i = nextIndex++;
+          if (i >= _inputFiles.length) break;
 
-        // Use filename as unique identifier for temp cover (for coverBytes)
-        final fileName = p.basenameWithoutExtension(newName);
-        File tempCoverFile = File(p.join(cacheDir.path, '${fileName}_cover.jpg'));
-        String? coverPathForEmbedding;
+          final parentDir = p.dirname(oldPaths[i]);
+          final newName = newNames[i];
+          final newFullPath = doRename ? p.join(parentDir, newName) : oldPaths[i];
 
-        if (doCover) {
-          // Priority 1: Use coverBytes if available
-          if (_matchResults[i].coverBytes != null) {
-            try {
-              tempCoverFile.writeAsBytesSync(_matchResults[i].coverBytes!);
-              if (tempCoverFile.existsSync()) {
-                coverPathForEmbedding = tempCoverFile.path;
-                debugPrint("✅ Cover written from bytes: ${tempCoverFile.path}");
-              }
-            } catch (e) {
-              debugPrint("⚠️  Failed to write cover from bytes: $e");
-            }
+          if (!doCover && !doEmbedFields) {
+            _inputFiles[i].renamedPath = newFullPath;
+            _applyProgress++;
+            notifyListeners();
+            continue;
           }
 
-          // Priority 2: Download from posterUrl (also used as fallback if coverBytes write failed)
-          if (coverPathForEmbedding == null) {
-            String? posterUrl = _matchResults[i].posterUrl;
-            if (posterUrl != null && posterUrl.isNotEmpty) {
-              String mediaType = _matchResults[i].season != null ? 'tv' : 'movie';
-              String? cachedPath = await PosterCacheService.downloadAndCachePoster(
-                posterUrl: posterUrl,
-                title: _matchResults[i].title ?? 'unknown',
-                year: _matchResults[i].year,
-                mediaType: mediaType,
-                season: _matchResults[i].season,
-              );
+          final fileName = p.basenameWithoutExtension(newName);
+          final tempCoverFile =
+              File(p.join(cacheDir.path, '${fileName}_cover.jpg'));
+          String? coverPathForEmbedding;
 
-              if (cachedPath != null) {
-                coverPathForEmbedding = cachedPath;
-                _matchResults[i] = _matchResults[i].copyWith(
-                  cachedPosterPath: cachedPath,
-                );
-                debugPrint("✅ Using cached poster: $cachedPath");
-              } else if (posterUrl.startsWith('http')) {
-                await CoreBackend.downloadCover(posterUrl, tempCoverFile.path);
-                if (tempCoverFile.existsSync() && tempCoverFile.lengthSync() > 1000) {
-                  coverPathForEmbedding = tempCoverFile.path;
-                }
-              } else if (File(posterUrl).existsSync()) {
-                File(posterUrl).copySync(tempCoverFile.path);
+          if (doCover) {
+            if (_matchResults[i].coverBytes != null) {
+              try {
+                tempCoverFile.writeAsBytesSync(_matchResults[i].coverBytes!);
                 if (tempCoverFile.existsSync()) {
                   coverPathForEmbedding = tempCoverFile.path;
                 }
+              } catch (e) {
+                debugPrint("⚠️  Failed to write cover from bytes: $e");
+              }
+            }
+
+            if (coverPathForEmbedding == null) {
+              final posterUrl = _matchResults[i].posterUrl;
+              if (posterUrl != null && posterUrl.isNotEmpty) {
+                final mediaType = _matchResults[i].season != null ? 'tv' : 'movie';
+                final cachedPath = await PosterCacheService.downloadAndCachePoster(
+                  posterUrl: posterUrl,
+                  title: _matchResults[i].title ?? 'unknown',
+                  year: _matchResults[i].year,
+                  mediaType: mediaType,
+                  season: _matchResults[i].season,
+                );
+
+                if (cachedPath != null) {
+                  coverPathForEmbedding = cachedPath;
+                  _matchResults[i] =
+                      _matchResults[i].copyWith(cachedPosterPath: cachedPath);
+                } else if (posterUrl.startsWith('http')) {
+                  await CoreBackend.downloadCover(posterUrl, tempCoverFile.path);
+                  if (tempCoverFile.existsSync() &&
+                      tempCoverFile.lengthSync() > 1000) {
+                    coverPathForEmbedding = tempCoverFile.path;
+                  }
+                } else if (File(posterUrl).existsSync()) {
+                  File(posterUrl).copySync(tempCoverFile.path);
+                  if (tempCoverFile.existsSync()) {
+                    coverPathForEmbedding = tempCoverFile.path;
+                  }
+                }
               }
             }
           }
-        }
 
-        // Embed Metadata with poster (cached or temporary)
-        debugPrint("🎬 Embedding metadata for: $newName");
-        await CoreBackend.embedMetadata(
-          newFullPath,
-          coverPathForEmbedding,
-          _matchResults[i],
-          settings: settings,
-          embedFields: doEmbedFields,
-        );
+          await CoreBackend.embedMetadata(
+            newFullPath,
+            coverPathForEmbedding,
+            _matchResults[i],
+            settings: settings,
+            embedFields: doEmbedFields,
+          );
 
-        // Mark as renamed
-        _inputFiles[i].renamedPath = newFullPath;
+          _inputFiles[i].renamedPath = newFullPath;
 
-        // Clean up temporary cover file (not cached files)
-        if (coverPathForEmbedding == tempCoverFile.path && tempCoverFile.existsSync()) {
-          try {
-            tempCoverFile.deleteSync();
-            debugPrint("🗑️  Cleaned up temp cover: ${tempCoverFile.path}");
-          } catch (e) {
-            debugPrint("⚠️  Failed to delete temp cover file: $e");
+          if (coverPathForEmbedding == tempCoverFile.path &&
+              tempCoverFile.existsSync()) {
+            try {
+              tempCoverFile.deleteSync();
+            } catch (e) {
+              debugPrint("⚠️  Failed to delete temp cover file: $e");
+            }
           }
+
+          _applyProgress++;
+          notifyListeners();
         }
       }
 
-      // Save Undo State (only when files were actually renamed)
+      await Future.wait(List.generate(3, (_) => worker()));
+
       if (doRename) {
         _lastRenamedOldPaths = List.from(oldPaths);
         _lastRenamedNewNames = List.from(newNames);
         _canUndo = true;
       }
-
-      // Do not clear list automatically. User must acknowledge.
     } catch (e) {
       debugPrint("Error during rename: $e");
     } finally {
       _isLoading = false;
+      _applyProgress = 0;
+      _applyTotal = 0;
       notifyListeners();
     }
   }
@@ -703,6 +706,7 @@ class FileStateService with ChangeNotifier {
   void clearAll() {
     _inputFiles.clear();
     _matchResults.clear();
+    ApiClient.clearCache();
     notifyListeners();
   }
 
