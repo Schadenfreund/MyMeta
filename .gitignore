@@ -12,6 +12,7 @@
 .swiftpm/
 migrate_working_dir/
 .claude/
+/MyTemplate/
 
 # IntelliJ related
 *.iml
@@ -58,5 +59,6 @@ API.txt
 
 # Personal developer notes (not for repo)
 HOW_TO_UPDATE.md
-/test/
 
+# Update-flow test artifacts (written by test_update_staging.ps1 -Automated)
+/test_update_log.txt
