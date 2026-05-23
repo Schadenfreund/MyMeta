@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 import '../backend/media_record.dart';
 import '../backend/match_result.dart';
 import '../backend/core_backend.dart';
+import '../constants/app_constants.dart';
 import '../utils/http_client.dart';
 import 'package:cross_file/cross_file.dart';
 import 'settings_service.dart';
 import 'poster_cache_service.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
-import 'package:http/http.dart' as http;
 
 class FileStateService with ChangeNotifier {
   final List<MediaRecord> _inputFiles = [];
@@ -32,13 +32,66 @@ class FileStateService with ChangeNotifier {
   int get applyProgress => _applyProgress;
   int get applyTotal => _applyTotal;
 
-  /// Sanitize filename by removing/replacing invalid Windows characters
+  /// Sanitize filename by removing/replacing invalid Windows characters.
+  /// Colons become " - " (preserves readability for titles like "Show: Subtitle").
   String _sanitizeFilename(String filename) {
     return filename
-        .replaceAll(':', ' - ')                  // Replace colon with space-dash-space
-        .replaceAll(RegExp(r'[\\/*?"<>|]'), '')  // Remove remaining invalid Windows chars
-        .replaceAll(RegExp(r'\s+'), ' ')          // Collapse multiple spaces
+        .replaceAll(':', ' - ')
+        .replaceAll(FileConfig.invalidFilenameChars, '')
+        .replaceAll(FileConfig.multipleSpaces, ' ')
         .trim();
+  }
+
+  /// Prepare a cover image for embedding by walking the priority chain:
+  ///   1. In-memory `coverBytes` already on the [MatchResult] — written to
+  ///      [tempCoverFile].
+  ///   2. Locally cached, resized poster from [PosterCacheService]. Also
+  ///      updates `cachedPosterPath` on the result.
+  ///   3. Direct HTTP download of `posterUrl` into [tempCoverFile].
+  ///   4. Local file referenced by `posterUrl` — copied into [tempCoverFile].
+  ///
+  /// Returns the path to a usable cover file, or `null` when no cover could
+  /// be prepared (caller should still embed metadata without artwork).
+  Future<String?> _prepareCoverPath(int index, File tempCoverFile) async {
+    final match = _matchResults[index];
+
+    if (match.coverBytes != null) {
+      try {
+        tempCoverFile.writeAsBytesSync(match.coverBytes!);
+        if (tempCoverFile.existsSync()) return tempCoverFile.path;
+      } catch (e) {
+        debugPrint("⚠️  Failed to write cover from bytes: $e");
+      }
+    }
+
+    final posterUrl = match.posterUrl;
+    if (posterUrl == null || posterUrl.isEmpty) return null;
+
+    final cachedPath = await PosterCacheService.downloadAndCachePoster(
+      posterUrl: posterUrl,
+      title: match.title ?? 'unknown',
+      year: match.year,
+      mediaType: match.season != null ? 'tv' : 'movie',
+      season: match.season,
+    );
+    if (cachedPath != null) {
+      _matchResults[index] = match.copyWith(cachedPosterPath: cachedPath);
+      return cachedPath;
+    }
+
+    if (posterUrl.startsWith('http')) {
+      await CoreBackend.downloadCover(posterUrl, tempCoverFile.path);
+      if (tempCoverFile.existsSync() && tempCoverFile.lengthSync() > 1000) {
+        return tempCoverFile.path;
+      }
+      return null;
+    }
+
+    if (File(posterUrl).existsSync()) {
+      File(posterUrl).copySync(tempCoverFile.path);
+      if (tempCoverFile.existsSync()) return tempCoverFile.path;
+    }
+    return null;
   }
 
   // Manual Override Support
@@ -64,12 +117,7 @@ class FileStateService with ChangeNotifier {
   Future<void> matchFiles(SettingsService settings) async {
     if (_inputFiles.isEmpty) return;
 
-    // Validation: Check if at least one API is configured
-    bool hasAnyApi = settings.tmdbApiKey.isNotEmpty ||
-        settings.omdbApiKey.isNotEmpty ||
-        settings.anidbClientId.isNotEmpty;
-
-    if (!hasAnyApi) {
+    if (!settings.hasAnyMetadataKey) {
       debugPrint('⚠️ No API keys configured for batch matching');
       return;
     }
@@ -117,12 +165,7 @@ class FileStateService with ChangeNotifier {
   }) async {
     if (index < 0 || index >= _inputFiles.length) return;
 
-    // Validation: Check if at least one API is configured
-    bool hasAnyApi = settings.tmdbApiKey.isNotEmpty ||
-        settings.omdbApiKey.isNotEmpty ||
-        settings.anidbClientId.isNotEmpty;
-
-    if (!hasAnyApi) {
+    if (!settings.hasAnyMetadataKey) {
       debugPrint('⚠️ No API keys configured for metadata search');
       return;
     }
@@ -176,17 +219,11 @@ class FileStateService with ChangeNotifier {
         if (result.posterUrl != null &&
             result.posterUrl!.isNotEmpty &&
             result.posterUrl!.startsWith('http')) {
-          try {
-            debugPrint("📥 Downloading cover for: ${result.title}");
-            final response = await http.get(Uri.parse(result.posterUrl!));
-            if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
-              // Use copyWith to preserve all fields while adding cover bytes
-              result = result.copyWith(coverBytes: response.bodyBytes);
-              debugPrint(
-                  "✅ Cover downloaded (${response.bodyBytes.length} bytes)");
-            }
-          } catch (e) {
-            debugPrint("⚠️  Failed to download cover: $e");
+          debugPrint("📥 Downloading cover for: ${result.title}");
+          final bytes = await ApiClient.getImageBytes(result.posterUrl!);
+          if (bytes != null && bytes.isNotEmpty) {
+            result = result.copyWith(coverBytes: bytes);
+            debugPrint("✅ Cover downloaded (${bytes.length} bytes)");
           }
         }
 
@@ -261,47 +298,7 @@ class FileStateService with ChangeNotifier {
           String? coverPathForEmbedding;
 
           if (doCover) {
-            if (_matchResults[i].coverBytes != null) {
-              try {
-                tempCoverFile.writeAsBytesSync(_matchResults[i].coverBytes!);
-                if (tempCoverFile.existsSync()) {
-                  coverPathForEmbedding = tempCoverFile.path;
-                }
-              } catch (e) {
-                debugPrint("⚠️  Failed to write cover from bytes: $e");
-              }
-            }
-
-            if (coverPathForEmbedding == null) {
-              final posterUrl = _matchResults[i].posterUrl;
-              if (posterUrl != null && posterUrl.isNotEmpty) {
-                final mediaType = _matchResults[i].season != null ? 'tv' : 'movie';
-                final cachedPath = await PosterCacheService.downloadAndCachePoster(
-                  posterUrl: posterUrl,
-                  title: _matchResults[i].title ?? 'unknown',
-                  year: _matchResults[i].year,
-                  mediaType: mediaType,
-                  season: _matchResults[i].season,
-                );
-
-                if (cachedPath != null) {
-                  coverPathForEmbedding = cachedPath;
-                  _matchResults[i] =
-                      _matchResults[i].copyWith(cachedPosterPath: cachedPath);
-                } else if (posterUrl.startsWith('http')) {
-                  await CoreBackend.downloadCover(posterUrl, tempCoverFile.path);
-                  if (tempCoverFile.existsSync() &&
-                      tempCoverFile.lengthSync() > 1000) {
-                    coverPathForEmbedding = tempCoverFile.path;
-                  }
-                } else if (File(posterUrl).existsSync()) {
-                  File(posterUrl).copySync(tempCoverFile.path);
-                  if (tempCoverFile.existsSync()) {
-                    coverPathForEmbedding = tempCoverFile.path;
-                  }
-                }
-              }
-            }
+            coverPathForEmbedding = await _prepareCoverPath(i, tempCoverFile);
           }
 
           await CoreBackend.embedMetadata(
@@ -419,52 +416,9 @@ class FileStateService with ChangeNotifier {
       String? coverPathForEmbedding;
 
       if (doCover) {
-        // Priority 1: Use coverBytes if already available
-        if (_matchResults[index].coverBytes != null) {
-          try {
-            tempCoverFile.writeAsBytesSync(_matchResults[index].coverBytes!);
-            if (tempCoverFile.existsSync()) {
-              coverPathForEmbedding = tempCoverFile.path;
-              debugPrint("✅ Cover written from bytes: ${tempCoverFile.path}");
-            }
-          } catch (e) {
-            debugPrint("⚠️  Failed to write cover from bytes: $e");
-          }
-        }
-
-        // Priority 2: Download from posterUrl
-        if (coverPathForEmbedding == null) {
-          String? posterUrl = _matchResults[index].posterUrl;
-          if (posterUrl != null && posterUrl.isNotEmpty) {
-            String mediaType = _matchResults[index].season != null ? 'tv' : 'movie';
-            String? cachedPath = await PosterCacheService.downloadAndCachePoster(
-              posterUrl: posterUrl,
-              title: _matchResults[index].title ?? 'unknown',
-              year: _matchResults[index].year,
-              mediaType: mediaType,
-              season: _matchResults[index].season,
-            );
-
-            if (cachedPath != null) {
-              coverPathForEmbedding = cachedPath;
-              _matchResults[index] = _matchResults[index].copyWith(
-                cachedPosterPath: cachedPath,
-              );
-              debugPrint("✅ Using cached resized poster: $cachedPath");
-            } else if (posterUrl.startsWith('http')) {
-              await CoreBackend.downloadCover(posterUrl, tempCoverFile.path);
-              if (tempCoverFile.existsSync() && tempCoverFile.lengthSync() > 1000) {
-                coverPathForEmbedding = tempCoverFile.path;
-                debugPrint("✅ Cover downloaded from URL (fallback): ${tempCoverFile.path}");
-              }
-            } else if (File(posterUrl).existsSync()) {
-              File(posterUrl).copySync(tempCoverFile.path);
-              if (tempCoverFile.existsSync()) {
-                coverPathForEmbedding = tempCoverFile.path;
-                debugPrint("✅ Cover copied from file: ${tempCoverFile.path}");
-              }
-            }
-          }
+        coverPathForEmbedding = await _prepareCoverPath(index, tempCoverFile);
+        if (coverPathForEmbedding != null) {
+          debugPrint("✅ Cover prepared: $coverPathForEmbedding");
         }
       }
 
@@ -546,19 +500,13 @@ class FileStateService with ChangeNotifier {
     }
   }
 
-  static const _videoExtensions = {
-    '.mp4', '.mkv', '.avi', '.mov', '.m4v', '.wmv', '.flv',
-    '.ts', '.m2ts', '.webm', '.mpg', '.mpeg',
-  };
-
   /// Recursively lists video files inside a directory.
   List<String> _listVideoFiles(String dirPath) {
     try {
       return Directory(dirPath)
           .listSync(recursive: true)
           .whereType<File>()
-          .where((f) =>
-              _videoExtensions.contains(p.extension(f.path).toLowerCase()))
+          .where((f) => FileConfig.isVideoFile(f.path))
           .map((f) => f.path)
           .toList()
         ..sort();
@@ -720,14 +668,4 @@ class FileStateService with ChangeNotifier {
     }
   }
 
-  // Update specific record (e.g. manual edit)
-  void updateRecordMetadata(int index, String? newTitle, int? newSeason,
-      int? newEpisode, int? newYear) {
-    // We can't easily update MediaRecord internal metadata since it's final in some parts or parsed.
-    // But we can update the 'override' fields if we had them or re-create the record.
-    // Actually MediaRecord uses ParsedMetadata.
-    // Let's make MediaRecord mutable or wrap it.
-    // For now, let's just trigger a re-parse or add a way to override.
-    // We will handle this by creating a new MediaRecord or modifying it if we make it mutable.
-  }
 }

@@ -1,14 +1,15 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
-import 'package:http/http.dart' as http;
+import '../constants/app_constants.dart';
+import '../utils/http_client.dart';
 import '../utils/image_utils.dart';
 
 /// Manages poster caching and resizing for efficient batch operations
 /// Reduces redundant downloads and re-processing when handling multiple files
 class PosterCacheService {
   static const String _cacheSubdir = 'CachedPosters';
-  static const int _minCacheFileSize = 5000; // 5KB minimum
+  static int get _minCacheFileSize => ImageConfig.minImageSizeBytes;
 
   /// Get path to cached poster, downloading and resizing if needed
   /// Returns the path to a resized 512px poster in cache, or null if unavailable
@@ -60,7 +61,7 @@ class PosterCacheService {
     try {
       // Download to temp file
       debugPrint('⏳ PosterCache: Downloading poster...');
-      final bytes = await _downloadFileBytes(posterUrl);
+      final bytes = await ApiClient.getImageBytes(posterUrl);
       if (bytes == null || bytes.isEmpty) {
         debugPrint('❌ PosterCache: Failed to download poster');
         return null;
@@ -106,25 +107,6 @@ class PosterCacheService {
     }
   }
 
-  /// Download file bytes from URL with timeout
-  static Future<List<int>?> _downloadFileBytes(String url) async {
-    try {
-      final response = await http
-          .get(Uri.parse(url))
-          .timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        return response.bodyBytes;
-      }
-
-      debugPrint('⚠️  HTTP ${response.statusCode}: $url');
-      return null;
-    } catch (e) {
-      debugPrint('❌ HTTP error downloading $url: $e');
-      return null;
-    }
-  }
-
   /// Generate consistent cache filename for a poster
   /// Movies: "Title_Year_512pixel.jpg"
   /// TV shows: "Title_Year_S##_512pixel.jpg"
@@ -135,9 +117,8 @@ class PosterCacheService {
     int? season,
   ) {
     String sanitized = title
-        .replaceAll(RegExp(r'[\\/*?"<>|]'), '')
-        .replaceAll(RegExp(r'\s+'), '_')
-        .replaceAll(':', '')
+        .replaceAll(FileConfig.invalidFilenameChars, '')
+        .replaceAll(FileConfig.multipleSpaces, '_')
         .trim();
 
     if (sanitized.isEmpty) sanitized = 'unknown';

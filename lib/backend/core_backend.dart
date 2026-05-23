@@ -8,6 +8,7 @@ import '../services/tmdb_service.dart';
 import '../services/omdb_service.dart';
 import '../services/anidb_service.dart';
 import '../services/settings_service.dart';
+import '../services/tool_resolver.dart';
 import '../utils/cover_extractor.dart';
 import 'package:http/http.dart' as http;
 
@@ -774,165 +775,31 @@ class CoreBackend {
     }
   }
 
-  // FFmpeg availability cache
-  static bool? _ffmpegAvailable;
+  // Resolved FFmpeg path for the session. Populated lazily by
+  // [_checkFFmpegAvailable] / [_resolveFfmpeg] so other static helpers can
+  // reuse it (e.g. for FFprobe path derivation in `_removeOldCoversFromMp4`).
   static String? _ffmpegPath;
 
-  /// Check FFmpeg availability (cached to avoid repeated checks)
-  /// Checks for bundled ffmpeg.exe first, then falls back to PATH
+  /// True if FFmpeg can be located via [ToolResolver]. Falls through to the
+  /// system PATH as a last resort so the app remains usable when users have
+  /// FFmpeg installed system-wide but haven't configured the path explicitly.
   static Future<bool> _checkFFmpegAvailable({SettingsService? settings}) async {
-    // Don't use cache if settings provided (path might have changed)
-    if (settings == null && _ffmpegAvailable != null) return _ffmpegAvailable!;
-
-    // 1. Try custom folder path from settings
-    if (settings != null && settings.ffmpegPath.isNotEmpty) {
-      try {
-        final binPath = p.join(settings.ffmpegPath, 'bin', 'ffmpeg.exe');
-        if (File(binPath).existsSync()) {
-          var result = await Process.run(binPath, ['-version']);
-          if (result.exitCode == 0) {
-            _ffmpegPath = binPath;
-            _ffmpegAvailable = true;
-            debugPrint('✅ Using custom FFmpeg: $binPath');
-            return true;
-          }
-        }
-
-        // Try without bin/ subdirectory
-        final directPath = p.join(settings.ffmpegPath, 'ffmpeg.exe');
-        if (File(directPath).existsSync()) {
-          var result = await Process.run(directPath, ['-version']);
-          if (result.exitCode == 0) {
-            _ffmpegPath = directPath;
-            _ffmpegAvailable = true;
-            debugPrint('✅ Using custom FFmpeg: $directPath');
-            return true;
-          }
-        }
-      } catch (e) {
-        // Continue to bundled check
-      }
-    }
-
-    // 2. Try bundled ffmpeg.exe in app directory
-    try {
-      final exePath = Platform.resolvedExecutable;
-      final exeDir = p.dirname(exePath);
-      final bundledFfmpeg = p.join(exeDir, 'ffmpeg.exe');
-
-      if (File(bundledFfmpeg).existsSync()) {
-        var result = await Process.run(bundledFfmpeg, ['-version']);
-        if (result.exitCode == 0) {
-          _ffmpegPath = bundledFfmpeg;
-          _ffmpegAvailable = true;
-          debugPrint('✅ Using bundled FFmpeg: $bundledFfmpeg');
-          return true;
-        }
-      }
-    } catch (e) {
-      // Continue to PATH check
-    }
-
-    // 3. Fall back to FFmpeg in PATH
-    try {
-      var result = await Process.run('ffmpeg', ['-version']);
-      _ffmpegAvailable = result.exitCode == 0;
-      _ffmpegPath = 'ffmpeg'; // Use from PATH
-      if (_ffmpegAvailable!) {
-        debugPrint('✅ Using FFmpeg from PATH');
-      }
-      return _ffmpegAvailable!;
-    } catch (e) {
-      _ffmpegAvailable = false;
-      return false;
-    }
+    _ffmpegPath = await ToolResolver.resolveExe(
+      'ffmpeg',
+      settings: settings,
+      usePathFallback: true,
+    );
+    return _ffmpegPath != null;
   }
 
-  /// Generic tool path resolver - checks UserData → custom → bundled
-  /// Returns null if tool not found (we skip PATH check to avoid hangs)
-  static Future<String?> _resolveToolPath(
-    String toolName,
-    String? customPath,
-  ) async {
-    // 0. Try UserData/tools folder first
-    try {
-      final exePath = Platform.resolvedExecutable;
-      final exeDir = p.dirname(exePath);
-      final toolNameLower = toolName.toLowerCase();
-      String userDataSubDir;
+  /// Resolve mkvpropedit. UserData → custom → bundled; no PATH fallback —
+  /// callers degrade to alternative paths if it's missing.
+  static Future<String?> _resolveMkvpropedit({SettingsService? settings}) =>
+      ToolResolver.resolveExe('mkvpropedit', settings: settings);
 
-      // Map tool names to their UserData subdirectory names
-      if (toolNameLower == 'mkvpropedit') {
-        userDataSubDir = 'mkvtoolnix';
-      } else if (toolNameLower == 'atomicparsley') {
-        userDataSubDir = 'atomicparsley';
-      } else {
-        userDataSubDir = toolNameLower;
-      }
-
-      final userDataTool = p.join(
-        exeDir,
-        'UserData',
-        'tools',
-        userDataSubDir,
-        '$toolName.exe',
-      );
-      if (File(userDataTool).existsSync()) {
-        debugPrint('✅ Using UserData $toolName: $userDataTool');
-        return userDataTool;
-      }
-    } catch (e) {
-      // Continue to custom path check
-    }
-
-    // 1. Try custom path from settings
-    if (customPath != null && customPath.isNotEmpty) {
-      // Try bin/ subdirectory first (like FFmpeg structure)
-      final binPath = p.join(customPath, 'bin', '$toolName.exe');
-      if (File(binPath).existsSync()) {
-        debugPrint('✅ Using custom $toolName: $binPath');
-        return binPath;
-      }
-
-      // Try direct path in folder
-      final directPath = p.join(customPath, '$toolName.exe');
-      if (File(directPath).existsSync()) {
-        debugPrint('✅ Using custom $toolName: $directPath');
-        return directPath;
-      }
-    }
-
-    // 2. Try bundled tool in app directory (deprecated - will be removed)
-    try {
-      final exePath = Platform.resolvedExecutable;
-      final exeDir = p.dirname(exePath);
-      final bundledTool = p.join(exeDir, '$toolName.exe');
-
-      if (File(bundledTool).existsSync()) {
-        debugPrint('✅ Using bundled $toolName: $bundledTool');
-        return bundledTool;
-      }
-    } catch (e) {
-      // Tool not found
-    }
-
-    // Tool not found - return null to trigger FFmpeg fallback
-    return null;
-  }
-
-  /// Resolve mkvpropedit path (custom → bundled → PATH)
-  static Future<String?> _resolveMkvpropedit({
-    SettingsService? settings,
-  }) async {
-    return _resolveToolPath('mkvpropedit', settings?.mkvpropeditPath);
-  }
-
-  /// Resolve AtomicParsley path (custom → bundled → PATH)
-  static Future<String?> _resolveAtomicParsley({
-    SettingsService? settings,
-  }) async {
-    return _resolveToolPath('AtomicParsley', settings?.atomicparsleyPath);
-  }
+  /// Resolve AtomicParsley. UserData → custom → bundled; no PATH fallback.
+  static Future<String?> _resolveAtomicParsley({SettingsService? settings}) =>
+      ToolResolver.resolveExe('AtomicParsley', settings: settings);
 
   /// Escape special characters for FFmpeg metadata
   static String _escapeMetadata(String value) {
@@ -968,52 +835,13 @@ class CoreBackend {
       return null;
     }
 
-    // Check FFprobe availability
-    String? ffprobePath;
-
-    // 1. Try custom folder path from settings first
-    if (settings != null && settings.ffmpegPath.isNotEmpty) {
-      // User provides folder path, we look in bin/ subdirectory
-      final binPath = p.join(settings.ffmpegPath, 'bin', 'ffprobe.exe');
-      if (File(binPath).existsSync()) {
-        ffprobePath = binPath;
-        debugPrint('✅ Using custom FFprobe: $ffprobePath');
-      } else {
-        // Try without bin/ subdirectory (in case user pointed directly to bin folder)
-        final directPath = p.join(settings.ffmpegPath, 'ffprobe.exe');
-        if (File(directPath).existsSync()) {
-          ffprobePath = directPath;
-          debugPrint('✅ Using custom FFprobe: $ffprobePath');
-        } else {
-          debugPrint('⚠️  FFprobe not found in: ${settings.ffmpegPath}');
-          debugPrint('    Expected: $binPath or $directPath');
-        }
-      }
-    }
-
-    // 2. Try bundled ffprobe (in same directory as exe)
-    if (ffprobePath == null) {
-      try {
-        final exePath = Platform.resolvedExecutable;
-        final exeDir = p.dirname(exePath);
-        final bundledFfprobe = p.join(exeDir, 'ffprobe.exe');
-
-        if (File(bundledFfprobe).existsSync()) {
-          ffprobePath = bundledFfprobe;
-          debugPrint('✅ Using bundled FFprobe: $bundledFfprobe');
-        }
-      } catch (e) {
-        debugPrint('⚠️  Could not locate bundled FFprobe: $e');
-      }
-    }
-
-    // 3. If still not found, just try "ffprobe" (assume it's in PATH)
-    if (ffprobePath == null) {
-      ffprobePath = 'ffprobe';
-      debugPrint(
-        '⚠️  FFprobe not found in custom/bundled paths, trying system PATH...',
-      );
-    }
+    final ffprobePath = await ToolResolver.resolveExe(
+          'ffprobe',
+          settings: settings,
+          usePathFallback: true,
+        ) ??
+        'ffprobe';
+    debugPrint('✅ Using FFprobe: $ffprobePath');
 
     // Run FFprobe to get metadata
     try {
@@ -1322,50 +1150,12 @@ class CoreBackend {
     String filePath, {
     SettingsService? settings,
   }) async {
-    // Check FFmpeg availability
-    String? ffmpegPath;
-
-    // 1. Try custom folder path from settings first
-    if (settings != null && settings.ffmpegPath.isNotEmpty) {
-      // User provides folder path, we look in bin/ subdirectory
-      final binPath = p.join(settings.ffmpegPath, 'bin', 'ffmpeg.exe');
-      if (File(binPath).existsSync()) {
-        ffmpegPath = binPath;
-      } else {
-        // Try without bin/ subdirectory
-        final directPath = p.join(settings.ffmpegPath, 'ffmpeg.exe');
-        if (File(directPath).existsSync()) {
-          ffmpegPath = directPath;
-        }
-      }
-    }
-
-    // 2. Try bundled FFmpeg
-    if (ffmpegPath == null) {
-      try {
-        final exePath = Platform.resolvedExecutable;
-        final exeDir = p.dirname(exePath);
-        final bundledFfmpeg = p.join(exeDir, 'ffmpeg.exe');
-
-        if (File(bundledFfmpeg).existsSync()) {
-          ffmpegPath = bundledFfmpeg;
-        }
-      } catch (e) {
-        // Continue to PATH check
-      }
-    }
-
-    // 3. Try system PATH
-    if (ffmpegPath == null) {
-      try {
-        var result = await Process.run('ffmpeg', ['-version']);
-        if (result.exitCode == 0) {
-          ffmpegPath = 'ffmpeg';
-        }
-      } catch (e) {
-        return null; // FFmpeg not available
-      }
-    }
+    final ffmpegPath = await ToolResolver.resolveExe(
+      'ffmpeg',
+      settings: settings,
+      usePathFallback: true,
+    );
+    if (ffmpegPath == null) return null;
 
     // Create cache folder in app directory (next to MyMeta.exe)
     final exePath = Platform.resolvedExecutable;
@@ -1384,7 +1174,7 @@ class CoreBackend {
     try {
       // First try: Extract attached picture (works for MKV files with embedded covers)
       var result = await Process.run(
-        ffmpegPath!,
+        ffmpegPath,
         [
           '-dump_attachment:t', '', // Dump all attachments with mimetype image
           '-i', filePath,
@@ -1517,19 +1307,27 @@ class CoreBackend {
     ];
   }
 
-  /// Remove old cover (attached_pic) from MP4 file before attaching new one
-  /// Uses FFmpeg to re-encode video streams while dropping old cover
-  /// Prevents old cover from persisting in Windows Explorer
+  /// Remove old cover (attached_pic) from MP4 file before attaching new one.
+  /// Uses FFmpeg to re-encode video streams while dropping the old cover so
+  /// the previous artwork stops appearing in Windows Explorer's preview.
   static Future<void> _removeOldCoversFromMp4(
     String filePath,
-    String? ffmpegPath,
-  ) async {
+    String? ffmpegPath, {
+    SettingsService? settings,
+  }) async {
     if (ffmpegPath == null || ffmpegPath.isEmpty) return;
+
+    final ffprobePath = await ToolResolver.resolveExe(
+          'ffprobe',
+          settings: settings,
+          usePathFallback: true,
+        ) ??
+        'ffprobe';
 
     try {
       // Check if file has attached images
       final probeResult = await Process.run(
-        ffmpegPath.replaceAll('ffmpeg.exe', 'ffprobe.exe'),
+        ffprobePath,
         [
           '-v', 'error',
           '-select_streams', 'v:1', // Check for second video stream (attached pic)
@@ -1748,7 +1546,7 @@ class CoreBackend {
     // to silently no-op, so AtomicParsley accumulates a new cover atom on every apply.
     if (hasCover) {
       if (_ffmpegPath == null) await _checkFFmpegAvailable(settings: settings);
-      await _removeOldCoversFromMp4(filePath, _ffmpegPath);
+      await _removeOldCoversFromMp4(filePath, _ffmpegPath, settings: settings);
     }
 
     List<String> args = [filePath];
@@ -1908,7 +1706,7 @@ class CoreBackend {
 
     // Remove old covers for MP4 to prevent duplicates and Windows Explorer caching issues
     if (ext == '.mp4' && hasCover) {
-      await _removeOldCoversFromMp4(filePath, _ffmpegPath);
+      await _removeOldCoversFromMp4(filePath, _ffmpegPath, settings: settings);
     }
 
     // Build command

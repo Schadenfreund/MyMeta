@@ -3,183 +3,92 @@ import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
 import '../theme/app_theme.dart';
 
-/// Helper class for showing styled, accent-colored snackbars throughout the app.
+/// Helper for showing consistently-styled, themed snackbars throughout the app.
+///
+/// All four variants share the same shape (floating, rounded, bordered surface);
+/// only the icon and accent color differ to convey severity.
 class SnackbarHelper {
-  /// Shows a success snackbar with accent color and a checkmark icon.
-  static void showSuccess(
-    BuildContext context,
-    String message, {
-    String? actionLabel,
-    VoidCallback? onAction,
-    Duration duration = const Duration(seconds: 3),
-  }) {
-    _showSnackbar(
-      context,
-      message: message,
-      icon: Icons.check_circle_outlined,
-      isSuccess: true,
-      actionLabel: actionLabel,
-      onAction: onAction,
-      duration: duration,
-    );
+  static void showSuccess(BuildContext context, String message,
+      {String? actionLabel, VoidCallback? onAction, Duration? duration}) {
+    _show(context,
+        message: message,
+        icon: Icons.check_circle_outlined,
+        accent: context.read<SettingsService>().accentColor,
+        actionLabel: actionLabel,
+        onAction: onAction,
+        duration: duration ?? const Duration(seconds: 3));
   }
 
-  /// Shows an info snackbar with accent color.
-  static void showInfo(
-    BuildContext context,
-    String message, {
-    String? actionLabel,
-    VoidCallback? onAction,
-    Duration duration = const Duration(seconds: 3),
-  }) {
-    _showSnackbar(
-      context,
-      message: message,
-      icon: Icons.info_outline,
-      isSuccess: false,
-      actionLabel: actionLabel,
-      onAction: onAction,
-      duration: duration,
-    );
+  static void showInfo(BuildContext context, String message,
+      {String? actionLabel, VoidCallback? onAction, Duration? duration}) {
+    _show(context,
+        message: message,
+        icon: Icons.info_outline,
+        accent: context.read<SettingsService>().accentColor,
+        actionLabel: actionLabel,
+        onAction: onAction,
+        duration: duration ?? const Duration(seconds: 3));
   }
 
-  /// Shows a warning snackbar with orange accent.
-  static void showWarning(
-    BuildContext context,
-    String message, {
-    String? actionLabel,
-    VoidCallback? onAction,
-    Duration duration = const Duration(seconds: 5),
-  }) {
+  static void showWarning(BuildContext context, String message,
+      {String? actionLabel, VoidCallback? onAction, Duration? duration}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(
-              Icons.warning_amber_rounded,
-              color: Colors.orange.shade300,
-              size: 20,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                message,
-                style: TextStyle(
-                  color: isDark ? AppColors.darkTextPrimary : Colors.white,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: Colors.orange.shade700,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-        duration: duration,
-        action: actionLabel != null && onAction != null
-            ? SnackBarAction(
-                label: actionLabel,
-                textColor: Colors.white,
-                onPressed: onAction,
-              )
-            : null,
-      ),
-    );
+    _show(context,
+        message: message,
+        icon: Icons.warning_amber_rounded,
+        accent: isDark ? AppColors.darkWarning : AppColors.lightWarning,
+        actionLabel: actionLabel,
+        onAction: onAction,
+        duration: duration ?? const Duration(seconds: 5));
   }
 
-  /// Shows an error snackbar with red accent.
-  static void showError(
-    BuildContext context,
-    String message, {
-    String? actionLabel,
-    VoidCallback? onAction,
-    Duration duration = const Duration(seconds: 4),
-  }) {
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(
-              Icons.error_outline,
-              color: Colors.white,
-              size: 20,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                message,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: AppColors.lightDanger,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
-        duration: duration,
-        action: actionLabel != null && onAction != null
-            ? SnackBarAction(
-                label: actionLabel,
-                textColor: Colors.white,
-                onPressed: onAction,
-              )
-            : null,
-      ),
-    );
+  static void showError(BuildContext context, String message,
+      {String? actionLabel, VoidCallback? onAction, Duration? duration}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    _show(context,
+        message: message,
+        icon: Icons.error_outline,
+        accent: isDark ? AppColors.darkDanger : AppColors.lightDanger,
+        actionLabel: actionLabel,
+        onAction: onAction,
+        duration: duration ?? const Duration(seconds: 4));
   }
 
-  /// Private method that builds and shows the styled snackbar.
-  static void _showSnackbar(
+  static void _show(
     BuildContext context, {
     required String message,
     required IconData icon,
-    required bool isSuccess,
+    required Color accent,
     String? actionLabel,
     VoidCallback? onAction,
-    Duration duration = const Duration(seconds: 3),
+    required Duration duration,
   }) {
-    final settings = context.read<SettingsService>();
-    final accentColor = settings.accentColor;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor =
+        isDark ? AppColors.darkTextPrimary : AppColors.lightTextPrimary;
+    final surface =
+        isDark ? AppColors.darkSurface : AppColors.lightSurface;
 
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
       SnackBar(
         content: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: accentColor.withOpacity(0.2),
+                color: accent.withOpacity(0.2),
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                icon,
-                color: accentColor,
-                size: 18,
-              ),
+              child: Icon(icon, color: accent, size: 18),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 message,
                 style: TextStyle(
-                  color: isDark
-                      ? AppColors.darkTextPrimary
-                      : AppColors.lightTextPrimary,
+                  color: textColor,
                   fontWeight: FontWeight.w500,
                   fontSize: 14,
                 ),
@@ -187,23 +96,19 @@ class SnackbarHelper {
             ),
           ],
         ),
-        backgroundColor:
-            isDark ? AppColors.darkSurface : AppColors.lightSurface,
+        backgroundColor: surface,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: BorderSide(
-            color: accentColor.withOpacity(0.3),
-            width: 1.5,
-          ),
+          side: BorderSide(color: accent.withOpacity(0.3), width: 1.5),
         ),
         duration: duration,
         action: actionLabel != null && onAction != null
             ? SnackBarAction(
                 label: actionLabel,
-                textColor: accentColor,
+                textColor: accent,
                 onPressed: onAction,
               )
             : null,

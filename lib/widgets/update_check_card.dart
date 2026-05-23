@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/update_service.dart';
 import '../services/settings_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/snackbar_helper.dart';
 
 /// Card for checking and installing app updates from GitHub
 class UpdateCheckCard extends StatefulWidget {
@@ -18,40 +19,116 @@ class UpdateCheckCard extends StatefulWidget {
 class _UpdateCheckCardState extends State<UpdateCheckCard> {
   bool _checking = false;
   PendingUpdate? _pendingUpdate;
+  String? _failedInstallVersion;
   final _updateService = UpdateService();
 
   @override
   void initState() {
     super.initState();
-    _checkPendingUpdate();
+    _reconcilePendingState();
   }
 
-  Future<void> _checkPendingUpdate() async {
-    final pending = await _updateService.checkPendingUpdate();
-    if (mounted) {
-      setState(() => _pendingUpdate = pending);
+  /// Inspect the on-disk state left by the previous run:
+  ///  - install succeeded → toast on next frame, after the build context is ready
+  ///  - install failed     → show a "previous update didn't complete" banner
+  ///  - install pending    → show the "ready to install" banner
+  Future<void> _reconcilePendingState() async {
+    final state = await _updateService.checkPendingUpdateState();
+    if (!mounted) return;
+
+    setState(() {
+      _pendingUpdate = state.pending;
+      _failedInstallVersion = state.failedVersion;
+    });
+
+    if (state.hasSucceeded) {
+      // Push the toast to the next frame so the ScaffoldMessenger has settled.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          SnackbarHelper.showSuccess(
+            context,
+            'Updated to v${state.succeededVersion}',
+            actionLabel: 'View release notes',
+            onAction: () => launchUrl(Uri.parse(UpdateService.latestReleaseUrl)),
+          );
+        }
+      });
     }
   }
 
   Future<void> _checkForUpdates() async {
     setState(() => _checking = true);
-
-    final updateInfo = await _updateService.checkForUpdates();
-
+    final result = await _updateService.checkForUpdates();
+    if (!mounted) return;
     setState(() => _checking = false);
+
+    // Record the timestamp so a future background-startup check can throttle.
+    await context.read<SettingsService>().setLastUpdateCheckAt(DateTime.now());
 
     if (!mounted) return;
 
-    if (updateInfo != null) {
-      _showUpdateDialog(updateInfo);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You are running the latest version'),
-          duration: Duration(seconds: 2),
-        ),
-      );
+    switch (result.status) {
+      case UpdateCheckStatus.available:
+        _showUpdateDialog(result.info!);
+        break;
+      case UpdateCheckStatus.upToDate:
+        SnackbarHelper.showInfo(
+          context,
+          'You are running the latest version',
+          duration: const Duration(seconds: 2),
+        );
+        break;
+      case UpdateCheckStatus.checkFailed:
+        SnackbarHelper.showError(
+          context,
+          result.errorMessage ?? 'Could not check for updates.',
+        );
+        break;
     }
+  }
+
+  Future<void> _viewInstallLog() async {
+    final log = UpdateService.readLastInstallLog();
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Last update log'),
+        content: SizedBox(
+          width: 600,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              log ?? 'No log was recorded.',
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _dismissFailureNotice() async {
+    setState(() => _failedInstallVersion = null);
+    await _updateService.cleanupPendingUpdate();
+  }
+
+  /// Pop the available-update dialog (via [dialogContext]), persist the
+  /// skipped version, and surface a confirmation toast. Keeps the dialog's
+  /// `BuildContext` out of the post-await branch.
+  Future<void> _skipVersion(BuildContext dialogContext, String version) async {
+    Navigator.pop(dialogContext);
+    await context.read<SettingsService>().setSkippedUpdateVersion(version);
+    if (!mounted) return;
+    SnackbarHelper.showInfo(
+      context,
+      "Skipped v$version. You'll be notified about future releases.",
+    );
   }
 
   void _showUpdateDialog(UpdateInfo updateInfo) {
@@ -83,8 +160,9 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
               ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            Container(
-              constraints: const BoxConstraints(maxHeight: 300),
+            SizedBox(
+              width: 500,
+              height: 360,
               child: SingleChildScrollView(
                 child: MarkdownBody(
                   data: updateInfo.releaseNotes,
@@ -104,17 +182,34 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
         ),
         actions: [
           TextButton(
+            onPressed: () => _skipVersion(context, updateInfo.version),
+            child: const Text('Skip this version'),
+          ),
+          TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Later'),
           ),
-          FilledButton.icon(
-            onPressed: () {
-              Navigator.pop(context);
-              _startUpdate(updateInfo);
-            },
-            icon: const Icon(Icons.download),
-            label: const Text('Update Now'),
-          ),
+          // On Windows we self-install; everywhere else we point the user at
+          // the GitHub releases page so they can update by hand. Same dialog,
+          // different primary action.
+          if (_updateService.canSelfInstall)
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _startUpdate(updateInfo);
+              },
+              icon: const Icon(Icons.download),
+              label: const Text('Update Now'),
+            )
+          else
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                launchUrl(Uri.parse(UpdateService.latestReleaseUrl));
+              },
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Open Download Page'),
+            ),
         ],
       ),
     );
@@ -127,10 +222,7 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
       builder: (context) => _UpdateProgressDialog(
         updateInfo: updateInfo,
         updateService: _updateService,
-        onCompleted: () {
-          // Refresh pending update state when download completes
-          _checkPendingUpdate();
-        },
+        onCompleted: _reconcilePendingState,
       ),
     );
   }
@@ -139,9 +231,7 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
     final error = await _updateService.launchUpdateScript();
     if (error != null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error)),
-        );
+        SnackbarHelper.showError(context, error);
       }
       return;
     }
@@ -203,6 +293,47 @@ class _UpdateCheckCardState extends State<UpdateCheckCard> {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
+
+          // Failed-install banner: the previous install left a pending.json
+          // behind but the version on disk didn't change, so something went
+          // wrong in robocopy/rsync. Offer the log for diagnostics.
+          if (_failedInstallVersion != null) ...[
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppColors.lightDanger.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(8),
+                border:
+                    Border.all(color: AppColors.lightDanger.withOpacity(0.35)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline,
+                      color: AppColors.lightDanger),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      "Last update to v$_failedInstallVersion didn't complete.",
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _viewInstallLog,
+                    child: const Text('View log'),
+                  ),
+                  IconButton(
+                    onPressed: _dismissFailureNotice,
+                    icon: const Icon(Icons.close, size: 18),
+                    tooltip: 'Dismiss',
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+          ],
 
           // Pending update banner
           if (_pendingUpdate != null) ...[

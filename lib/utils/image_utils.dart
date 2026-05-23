@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:path/path.dart' as p;
+import '../services/tool_resolver.dart';
 
 /// Image processing utilities using FFmpeg
 class ImageUtils {
@@ -18,8 +18,10 @@ class ImageUtils {
     }
 
     try {
-      // Get FFmpeg path (cached static from CoreBackend)
-      final ffmpegPath = _getFFmpegPath();
+      final ffmpegPath = await ToolResolver.resolveExe(
+        'ffmpeg',
+        usePathFallback: true,
+      );
       if (ffmpegPath == null || ffmpegPath.isEmpty) {
         debugPrint('❌ ImageUtils: FFmpeg not available');
         return false;
@@ -60,36 +62,4 @@ class ImageUtils {
     }
   }
 
-  /// Get FFmpeg path from UserData/tools, bundled location, or system PATH
-  /// Returns null if FFmpeg is not available
-  static String? _getFFmpegPath() {
-    try {
-      final exePath = Platform.resolvedExecutable;
-      final exeDir = p.dirname(exePath);
-
-      // Check UserData/tools/ffmpeg (portable location)
-      for (final sub in ['bin/ffmpeg.exe', 'ffmpeg.exe']) {
-        final toolPath = p.join(exeDir, 'UserData', 'tools', 'ffmpeg', sub);
-        if (File(toolPath).existsSync()) return toolPath;
-      }
-
-      // Check bundled FFmpeg (app directory)
-      final bundledFfmpeg = p.join(exeDir, 'ffmpeg.exe');
-      if (File(bundledFfmpeg).existsSync()) return bundledFfmpeg;
-
-      // Check PATH
-      final pathResult = Process.runSync('where', ['ffmpeg.exe']);
-      if (pathResult.exitCode == 0) {
-        final pathOutput = pathResult.stdout.toString().trim();
-        if (pathOutput.isNotEmpty) {
-          return pathOutput.split('\n').first;
-        }
-      }
-
-      return null;
-    } catch (e) {
-      debugPrint('⚠️  ImageUtils: Error locating FFmpeg: $e');
-      return null;
-    }
-  }
 }

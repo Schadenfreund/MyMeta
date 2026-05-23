@@ -92,11 +92,6 @@ class FilenameParser {
       }
     }
     
-    // Clean up title
-    if (title != null) {
-       title = _cleanTitle(title);
-    }
-
     return ParsedMetadata(
       title: title,
       year: year,
@@ -105,10 +100,5 @@ class FilenameParser {
       type: type,
       container: container,
     );
-  }
-
-  static String _cleanTitle(String raw) {
-    // Remove common release group junk if needed, or just keep it simple
-    return raw;
   }
 }

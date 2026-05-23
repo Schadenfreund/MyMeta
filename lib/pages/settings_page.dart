@@ -8,6 +8,7 @@ import '../widgets/tool_paths_card.dart';
 import '../widgets/app_card.dart';
 import '../widgets/update_check_card.dart';
 import '../theme/app_theme.dart';
+import '../utils/snackbar_helper.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -26,32 +27,15 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
-  String _getColorName(Color color) {
-    // Map color values to their names
-    const colorMap = {
-      0xFF6366F1: 'Indigo',
-      0xFF3B82F6: 'Blue',
-      0xFF8B5CF6: 'Purple',
-      0xFFBE0AB4: 'Pink',
-      0xFFEF4444: 'Red',
-      0xFFF97316: 'Orange',
-      0xFF10B981: 'Green',
-      0xFF14B8A6: 'Teal',
-    };
-    return colorMap[color.value] ?? 'Custom';
-  }
-
   Future<void> _openPayPal(BuildContext context) async {
     final Uri url = Uri.parse('https://www.paypal.com/paypalme/ivburic');
     try {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not open PayPal. Visit: paypal.me/ivburic'),
-            duration: Duration(seconds: 4),
-          ),
+        SnackbarHelper.showError(
+          context,
+          'Could not open PayPal. Visit: paypal.me/ivburic',
         );
       }
     }
@@ -111,7 +95,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _getColorName(settings.accentColor),
+                          AccentColorPicker.nameOf(settings.accentColor),
                           style:
                               Theme.of(context).textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.w600,
@@ -119,7 +103,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '#${settings.accentColor.value.toRadixString(16).substring(2).toUpperCase()}',
+                          '#${settings.accentColor.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
                           style:
                               Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: isDark

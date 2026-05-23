@@ -144,13 +144,7 @@ class _HomePageState extends State<HomePage>
             width: 1,
           ),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: AppTheme.lightHeaderShadow,
       ),
       child: TabBar(
         controller: _tabController,

@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
+import '../constants/app_constants.dart';
+import 'tool_resolver.dart';
 
 /// Service for downloading and managing third-party tools
 class ToolDownloaderService {
@@ -23,63 +25,13 @@ class ToolDownloaderService {
     return path != null;
   }
 
-  static String _getStartDirName(String toolName) {
-    switch (toolName.toLowerCase()) {
-      case 'ffmpeg':
-        return 'ffmpeg';
-      case 'mkvpropedit':
-        return 'mkvtoolnix';
-      case 'atomicparsley':
-        return 'atomicparsley';
-      default:
-        return toolName;
-    }
-  }
-
-  /// Get the path to a specific tool
-  static Future<String?> getToolPath(String toolName) async {
-    final toolsDir = await getToolsDirectory();
-    final subDir = _getStartDirName(toolName);
-
-    // Normalize exe name
-    String exeName;
-    if (toolName.toLowerCase() == 'mkvpropedit')
-      exeName = 'mkvpropedit.exe';
-    else if (toolName.toLowerCase() == 'atomicparsley')
-      exeName = 'AtomicParsley.exe';
-    else
-      exeName = '$toolName.exe';
-
-    final dir = Directory(p.join(toolsDir.path, subDir));
-    if (!dir.existsSync()) return null;
-
-    // 1. Try direct path (flat install)
-    final directPath = p.join(dir.path, exeName);
-    if (File(directPath).existsSync()) return directPath;
-
-    // 2. Try bin/ subdirectory (simple structure)
-    final binPath = p.join(dir.path, 'bin', exeName);
-    if (File(binPath).existsSync()) return binPath;
-
-    // 3. Robust recursive search
-    try {
-      // Get all entities, recursively
-      final entities = dir.listSync(recursive: true, followLinks: false);
-
-      for (final entity in entities) {
-        if (entity is File) {
-          final name = p.basename(entity.path);
-          if (name.toLowerCase() == exeName.toLowerCase()) {
-            return entity.path;
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('Recursive search failed for $toolName: $e');
-    }
-
-    return null;
-  }
+  /// Path to the installed executable for [toolName] under `UserData/tools`,
+  /// or `null` when the tool is not installed. Thin wrapper around
+  /// [ToolResolver] preserved for backwards compatibility with existing
+  /// callers — note that [ToolResolver] also consults custom-configured
+  /// paths and the bundled location.
+  static Future<String?> getToolPath(String toolName) =>
+      ToolResolver.resolveExe(toolName);
 
   /// Download and extract a tool with progress callback
   static Future<bool> downloadTool(
@@ -89,23 +41,12 @@ class ToolDownloaderService {
   }) async {
     try {
       final toolsDir = await getToolsDirectory();
+      final bool is7z = url.toLowerCase().endsWith('.7z');
 
-      String subDir;
-      bool is7z = url.toLowerCase().endsWith('.7z');
-
-      switch (toolName.toLowerCase()) {
-        case 'ffmpeg':
-          subDir = 'ffmpeg';
-          break;
-        case 'mkvpropedit':
-          subDir = 'mkvtoolnix';
-          break;
-        case 'atomicparsley':
-          subDir = 'atomicparsley';
-          break;
-        default:
-          throw Exception('Unknown tool: $toolName');
+      if (!ToolConfig.toolSubdirectories.containsKey(toolName.toLowerCase())) {
+        throw Exception('Unknown tool: $toolName');
       }
+      final subDir = ToolConfig.getSubdirectory(toolName);
 
       final targetDir = Directory(p.join(toolsDir.path, subDir));
       if (targetDir.existsSync()) {
@@ -147,19 +88,11 @@ class ToolDownloaderService {
       await for (final chunk in response.stream) {
         chunks.addAll(chunk);
         downloadedBytes += chunk.length;
-        if (totalBytes > 0) {
-          progressCallback?.call(
-            downloadedBytes,
-            totalBytes,
-            'Downloading... ${(downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB',
-          );
-        } else {
-          progressCallback?.call(
-            downloadedBytes,
-            totalBytes,
-            'Downloading... ${(downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB',
-          );
-        }
+        progressCallback?.call(
+          downloadedBytes,
+          totalBytes,
+          'Downloading... ${(downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB',
+        );
       }
 
       // Save to temp file
@@ -180,6 +113,9 @@ class ToolDownloaderService {
       }
 
       tempFile.deleteSync();
+
+      // Newly-extracted binary supersedes any previously cached location.
+      ToolResolver.invalidate(toolName);
 
       progressCallback?.call(totalBytes, totalBytes, 'Complete!');
       return true;

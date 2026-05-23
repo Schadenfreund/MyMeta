@@ -18,6 +18,16 @@ class AccentColorPicker extends StatelessWidget {
     ColorOption('Teal', Color(0xFF14B8A6)),
   ];
 
+  /// Display name for [color] if it matches one of the predefined accent
+  /// options; falls back to `'Custom'` for user-picked hex values.
+  static String nameOf(Color color) {
+    final argb = color.toARGB32();
+    for (final option in colors) {
+      if (option.color.toARGB32() == argb) return option.name;
+    }
+    return 'Custom';
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
@@ -27,7 +37,7 @@ class AccentColorPicker extends StatelessWidget {
       runSpacing: 16,
       children: colors.map((colorOption) {
         final isSelected =
-            colorOption.color.value == settings.accentColor.value;
+            colorOption.color.toARGB32() == settings.accentColor.toARGB32();
 
         return _ColorCircle(
           colorOption: colorOption,

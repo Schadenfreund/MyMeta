@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import '../services/settings_service.dart';
+import '../services/tool_resolver.dart';
 import 'windows_thumbnail.dart';
 
 /// Helper class for extracting cover art from media files
@@ -93,6 +94,7 @@ class CoverExtractor {
       }
       return null;
     } catch (e) {
+      debugPrint('  ⚠️  Direct-memory extraction failed: $e');
       return null;
     }
   }
@@ -175,40 +177,9 @@ class CoverExtractor {
     return null;
   }
 
-  /// Resolve AtomicParsley path (UserData → custom → bundled → PATH)
-  static Future<String?> _resolveAtomicParsley(
-      {SettingsService? settings}) async {
-    // 0. Try UserData/tools folder first
-    try {
-      final exePath = Platform.resolvedExecutable;
-      final exeDir = p.dirname(exePath);
-      final userDataTool = p.join(
-          exeDir, 'UserData', 'tools', 'atomicparsley', 'AtomicParsley.exe');
-      if (File(userDataTool).existsSync()) return userDataTool;
-    } catch (_) {}
-
-    // 1. Try custom path from settings
-    if (settings != null && settings.atomicparsleyPath.isNotEmpty) {
-      final binPath =
-          p.join(settings.atomicparsleyPath, 'bin', 'AtomicParsley.exe');
-      if (File(binPath).existsSync()) return binPath;
-
-      final directPath =
-          p.join(settings.atomicparsleyPath, 'AtomicParsley.exe');
-      if (File(directPath).existsSync()) return directPath;
-    }
-
-    // 2. Try bundled tool (deprecated - will be removed)
-    try {
-      final exePath = Platform.resolvedExecutable;
-      final exeDir = p.dirname(exePath);
-      final bundledTool = p.join(exeDir, 'AtomicParsley.exe');
-      if (File(bundledTool).existsSync()) return bundledTool;
-    } catch (_) {}
-
-    // 3. Try PATH
-    return null; // Don't assume it's in PATH
-  }
+  /// Resolve AtomicParsley path (UserData → custom → bundled).
+  static Future<String?> _resolveAtomicParsley({SettingsService? settings}) =>
+      ToolResolver.resolveExe('AtomicParsley', settings: settings);
 
   /// FFmpeg method 1: Try extracting attached picture
   static Future<Uint8List?> _tryExtractAttachment(
@@ -229,6 +200,7 @@ class CoverExtractor {
 
       return _validateImageBytes(result.stdout, 'FFmpeg attachment');
     } catch (e) {
+      debugPrint('  ⚠️  FFmpeg attachment extract failed: $e');
       return null;
     }
   }
@@ -274,6 +246,7 @@ class CoverExtractor {
         return _validateImageBytes(result.stdout, 'FFmpeg last stream');
       }
     } catch (e) {
+      debugPrint('  ⚠️  FFmpeg last-stream extract failed: $e');
       return null;
     }
     return null;
@@ -298,6 +271,7 @@ class CoverExtractor {
 
       return _validateImageBytes(result.stdout, 'FFmpeg first frame');
     } catch (e) {
+      debugPrint('  ⚠️  FFmpeg first-frame extract failed: $e');
       return null;
     }
   }
@@ -323,34 +297,11 @@ class CoverExtractor {
     return null;
   }
 
-  /// Get FFmpeg executable path (UserData → custom → bundled → PATH)
-  static Future<String?> _getFFmpegPath(SettingsService? settings) async {
-    // 0. Try UserData/tools folder first
-    try {
-      final exePath = Platform.resolvedExecutable;
-      final exeDir = p.dirname(exePath);
-      final userDataTool =
-          p.join(exeDir, 'UserData', 'tools', 'ffmpeg', 'ffmpeg.exe');
-      if (File(userDataTool).existsSync()) return userDataTool;
-    } catch (_) {}
-
-    // 1. Custom folder
-    if (settings != null && settings.ffmpegPath.isNotEmpty) {
-      final binPath = p.join(settings.ffmpegPath, 'bin', 'ffmpeg.exe');
-      if (File(binPath).existsSync()) return binPath;
-
-      final directPath = p.join(settings.ffmpegPath, 'ffmpeg.exe');
-      if (File(directPath).existsSync()) return directPath;
-    }
-
-    // 2. Bundled (deprecated - will be removed)
-    try {
-      final exePath = Platform.resolvedExecutable;
-      final bundled = p.join(p.dirname(exePath), 'ffmpeg.exe');
-      if (File(bundled).existsSync()) return bundled;
-    } catch (_) {}
-
-    // 3. PATH - just try 'ffmpeg' without version check to avoid hangs
-    return 'ffmpeg';
-  }
+  /// Resolve FFmpeg path (UserData → custom → bundled → PATH).
+  static Future<String?> _getFFmpegPath(SettingsService? settings) =>
+      ToolResolver.resolveExe(
+        'ffmpeg',
+        settings: settings,
+        usePathFallback: true,
+      );
 }

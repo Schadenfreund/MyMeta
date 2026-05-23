@@ -5,6 +5,56 @@ All notable changes to MyMeta will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.8] - 2026-05-23
+
+### Added
+
+- **Update flow is now OS-aware via `UpdateInstaller`.** Windows uses the full self-install path (download → verify SHA256 → robocopy → relaunch). Linux and macOS use the new `RedirectInstaller`, which surfaces "Open Download Page" in the Update Available dialog and lets the user install manually from GitHub. Same check-for-update logic on every platform; only the install action differs. This avoids the cross-distro packaging mess (AppImage / Flatpak / .deb / .rpm / Homebrew / .app code-signing) while keeping the in-app update affordance.
+- **Pre-flight writability check.** Before staging an update we probe the app folder by writing and deleting a tiny marker file. If MyMeta was installed under `C:\Program Files\` (or any other read-only location), the user gets a specific "move to a writable location" message instead of a half-finished install. Failure happens *before* any download.
+- **SHA256 verification** — When a release ships a `SHA256SUMS` (or per-archive `*.sha256`) asset, the downloaded archive's digest is checked before extraction. Mismatch aborts the install with a clear UI message. When no sums asset is present, the download proceeds and a warning is logged.
+- **Failed-install detection** — On launch, `UpdateService.checkPendingUpdateState()` reconciles disk state against the running version. If a `pending.json` was left behind but the version didn't change, the Settings → Updates card shows a red "Last update didn't complete" banner with a "View log" button that displays `update_mymeta.log` (the script's own diagnostic output). If the version *did* change, a one-shot "Updated to vX.Y.Z" toast is surfaced on the next frame.
+- **"Skip this version"** — The Update Available dialog now has three actions: Skip / Later / Update Now. Skipping persists the version in `settings.json` (`skipped_update_version`) so the banner doesn't reappear until a strictly newer release ships.
+- **`UpdateCheckResult` separates "no update" from "couldn't check"** — Rate-limit (HTTP 403), connection errors, and other failures previously surfaced as "You are running the latest version." They now show a specific error snackbar so the user knows the check itself failed.
+
+### Changed
+
+- **Windows updater — no visible windows.** Three layers ensure the installer runs invisibly:
+  1. `cmd.exe` is spawned with `ProcessStartMode.detached`, which sets `CREATE_NO_WINDOW` — cmd can't allocate a console.
+  2. `start "" /b` keeps the child in the (non-existent) console and sets `CREATE_BREAKAWAY_FROM_JOB` so the script survives our `exit(0)` even when MyMeta runs inside VS Code or Explorer's Job Object.
+  3. PowerShell is invoked with `-WindowStyle Hidden -NonInteractive -NoProfile -ExecutionPolicy Bypass`, plus `-File` instead of `-EncodedCommand` (no more 32 KB length limit, no UTF-16LE/base64 dance).
+- **Windows updater — fails noisily, not silently.** `$ErrorActionPreference = 'Stop'` and a top-level `try { … } catch { … }` mean any unexpected error lands in `update_mymeta.log` with a stack trace, which the failed-install banner exposes via "View log".
+- **Update flow robustness:**
+  - Process wait is PID-targeted (`Wait-Process -Id $pid`). The previous Windows script polled by process *name*, which would false-positive against any lingering same-name process from a previous crash.
+  - Download has one automatic retry on transient network errors before giving up. Most update-time failures are flaky wifi.
+  - Archive extraction dispatches by file extension (`.zip` → `ZipDecoder`, `.tar.gz`/`.tgz` → `GZipDecoder` + `TarDecoder`) so the same code path handles all three platforms' release assets.
+  - GitHub asset matcher is now platform-aware and graceful: it picks the asset whose name contains the platform key (`windows` / `linux` / `macos`) and the right extension; if no match exists for the current OS, the user gets a specific error instead of a thrown exception.
+  - GitHub API calls now send a `User-Agent: MyMeta-Updater` header (GitHub asks for one and may rate-limit harder without it).
+- **Update Available dialog:** release notes panel grew from `maxHeight: 300` to a 500×360 SizedBox so longer changelogs are easier to read without nested scrolling.
+
+### Code Cleanup
+
+- **Code Cleanup** — Codebase-wide pass to consolidate duplication and unify styling without changing behaviour:
+  - **One `ToolResolver` for every external CLI tool** — six near-duplicate implementations of "find ffmpeg / ffprobe / mkvpropedit / AtomicParsley" (in `CoreBackend`, `ImageUtils`, `CoverExtractor`, `ToolDownloaderService`, twice in `SettingsService`) collapsed into a single `lib/services/tool_resolver.dart`. Resolution order is now uniform — UserData → custom-configured folder → bundled → PATH — with per-tool session caching. Setting a new tool path or downloading a tool invalidates the cache automatically. Net: ~200 lines removed.
+  - **ffprobe resolution no longer string-replaces `ffmpeg.exe` → `ffprobe.exe`** — that approach broke down on case-sensitive paths and on platforms without an `.exe` extension. It now goes through the same `ToolResolver`, which derives the correct executable name from `Platform.isWindows`. Side-effect: opens the door to building for Linux / macOS.
+  - **Single cover-prep helper in `FileStateService`** — the priority chain (in-memory bytes → cached resized poster → HTTP download → local file) was duplicated between `renameFiles` and `renameSingleFile` (~80 lines each). Extracted to a private `_prepareCoverPath`.
+  - **`AccentColorPicker.nameOf`** — the eight accent-color names lived in two places (the picker's `ColorOption` list and `SettingsPage._getColorName`). `nameOf` is now derived from the picker's list; adding a colour only requires updating one place.
+  - Tool subdirectory mapping (ffmpeg / mkvtoolnix / atomicparsley) now resolves through the shared `ToolConfig.getSubdirectory` everywhere instead of repeated switch statements in `SettingsService` and `ToolDownloaderService`.
+  - `SettingsService._tryAutoFixInvalidPath` and `_tryAutoFixPath` collapsed onto shared `_findToolInUserData` + `_applyFoundToolPath` helpers (~110 lines removed). `validateAndFixToolPaths` flattened from nested branches into a linear loop with a `_clearToolPath` helper.
+  - Filename sanitisation, supported video extensions, "any API key configured?" and minimum image size are now read from the shared constants in `app_constants.dart` instead of being redefined in `FileStateService` and `PosterCacheService`.
+  - Cover and poster downloads route through `ApiClient.getImageBytes` (with its existing timeout + size validation) instead of raw `http.get`.
+  - Deprecated `Color.value` replaced with `Color.toARGB32()` in the settings page and accent picker (matches what `SettingsService` already saves).
+- **Diagnostic Visibility** — Four `catch (e)` blocks in `CoverExtractor` that previously swallowed FFmpeg / AtomicParsley failures silently now `debugPrint` the error. Helps trace "no cover extracted" reports without changing behaviour for end users.
+- **Snackbar Consistency** — All four snackbar variants (success / info / warning / error) now share one builder and look like a single family: floating, rounded, bordered surface — only the icon and accent colour differ. Warning and error previously used coloured backgrounds with white text, which clashed with the surface-styled success/info. Warning uses the themed warning colour; error uses the themed danger colour.
+- **Header Shadow Reuse** — Tab bar in `HomePage` now uses the existing `AppTheme.lightHeaderShadow` instead of an inline duplicate `BoxShadow`.
+
+### Fixed
+
+- **Inconsistent Snackbar Styling** — Three call sites (settings page PayPal launch failure, update check "up to date" message, update launch failure) used the raw `ScaffoldMessenger.showSnackBar` with default styling; replaced with `SnackbarHelper` so every snackbar in the app now matches.
+
+### Removed
+
+- Dead code: `_cleanTitle` no-op in `FilenameParser`, empty `updateRecordMetadata` in `FileStateService`, duplicated `if (totalBytes > 0) … else …` branches in `ToolDownloaderService`, and the now-unused `_downloadFileBytes` in `PosterCacheService`.
+
 ## [1.1.7] - 2026-05-14
 
 ### Added

@@ -104,6 +104,12 @@ class FileConfig {
     '.mov',
     '.wmv',
     '.m4v',
+    '.flv',
+    '.ts',
+    '.m2ts',
+    '.webm',
+    '.mpg',
+    '.mpeg',
   ];
 
   /// Check if a file extension is a supported video format

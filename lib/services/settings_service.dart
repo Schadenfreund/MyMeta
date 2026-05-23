@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import '../constants/app_constants.dart';
+import 'tool_resolver.dart';
 
 class SettingsService with ChangeNotifier {
   // Defaults
@@ -44,6 +46,10 @@ class SettingsService with ChangeNotifier {
   bool _isMkvpropeditAvailable = false;
   bool _isAtomicParsleyAvailable = false;
   bool _isCheckingTools = false;
+
+  // Update flow state. Persisted so the banner survives app restarts.
+  String _skippedUpdateVersion = '';
+  DateTime? _lastUpdateCheckAt;
 
   ThemeMode get themeMode => _themeMode;
   String get seriesFormat => _seriesFormat;
@@ -90,6 +96,9 @@ class SettingsService with ChangeNotifier {
 
   int get lifetimeTvShowsMatched => _lifetimeTvShowsMatched;
   int get lifetimeMoviesMatched => _lifetimeMoviesMatched;
+
+  String get skippedUpdateVersion => _skippedUpdateVersion;
+  DateTime? get lastUpdateCheckAt => _lastUpdateCheckAt;
 
   /// Get the portable UserData folder path (next to executable)
   Future<String> _getUserDataPath() async {
@@ -179,6 +188,13 @@ class SettingsService with ChangeNotifier {
       _lifetimeTvShowsMatched = data['lifetime_tv_shows_matched'] ?? 0;
       _lifetimeMoviesMatched = data['lifetime_movies_matched'] ?? 0;
 
+      // Update flow state
+      _skippedUpdateVersion = data['skipped_update_version'] ?? '';
+      final lastCheckIso = data['last_update_check_at'] as String?;
+      if (lastCheckIso != null) {
+        _lastUpdateCheckAt = DateTime.tryParse(lastCheckIso);
+      }
+
       await checkToolAvailability();
       notifyListeners();
       debugPrint('✅ Settings loaded from UserData folder');
@@ -188,8 +204,26 @@ class SettingsService with ChangeNotifier {
     }
   }
 
-  /// Validate and fix tool paths (for portable app - critical on startup)
-  /// This ensures paths are still valid after app is moved
+  /// Clear the stored path and availability flag for [toolName].
+  void _clearToolPath(String toolName) {
+    switch (toolName.toLowerCase()) {
+      case 'ffmpeg':
+        _ffmpegPath = '';
+        _isFFmpegAvailable = false;
+        break;
+      case 'mkvpropedit':
+        _mkvpropeditPath = '';
+        _isMkvpropeditAvailable = false;
+        break;
+      case 'atomicparsley':
+        _atomicparsleyPath = '';
+        _isAtomicParsleyAvailable = false;
+        break;
+    }
+  }
+
+  /// Validate and fix tool paths (for portable app - critical on startup).
+  /// Ensures paths are still valid after the app folder is moved.
   Future<void> validateAndFixToolPaths() async {
     debugPrint('🔍 Validating tool paths...');
 
@@ -205,151 +239,112 @@ class SettingsService with ChangeNotifier {
     for (final entry in pathsToValidate.entries) {
       final toolName = entry.key;
       final savedPath = entry.value;
+      if (savedPath.isEmpty) continue;
 
-      if (savedPath.isEmpty) continue; // No path saved, skip
-
-      // Check if saved path still exists
-      if (!Directory(savedPath).existsSync()) {
-        debugPrint('⚠️  Saved path for $toolName no longer exists: $savedPath');
-        invalidTools.add(toolName);
-
-        // Try to auto-fix by finding in UserData/tools
-        final fixAttempted =
-            await _tryAutoFixInvalidPath(toolName.toLowerCase());
-        if (fixAttempted) {
-          fixedTools.add(toolName);
-          debugPrint('✅ Auto-fixed $toolName path');
-        } else {
-          // Clear invalid path
-          if (toolName == 'FFmpeg') {
-            _ffmpegPath = '';
-            _isFFmpegAvailable = false;
-          } else if (toolName == 'mkvpropedit') {
-            _mkvpropeditPath = '';
-            _isMkvpropeditAvailable = false;
-          } else if (toolName == 'AtomicParsley') {
-            _atomicparsleyPath = '';
-            _isAtomicParsleyAvailable = false;
-          }
-          debugPrint('❌ Cleared invalid path for $toolName');
-        }
-      } else {
-        // Path exists, but verify the actual executable is there
+      // A path is invalid if the directory is gone, or if the executable
+      // isn't reachable directly or via a bin/ subdirectory.
+      bool pathInvalid = !Directory(savedPath).existsSync();
+      if (!pathInvalid) {
         final exeName = toolName == 'mkvpropedit'
             ? 'mkvpropedit.exe'
             : '${toolName.toLowerCase()}.exe';
-        final directExe = p.join(savedPath, exeName);
-        final binExe = p.join(savedPath, 'bin', exeName);
-
-        if (!File(directExe).existsSync() && !File(binExe).existsSync()) {
-          // Path exists but executable not found
+        pathInvalid = !File(p.join(savedPath, exeName)).existsSync() &&
+            !File(p.join(savedPath, 'bin', exeName)).existsSync();
+        if (pathInvalid) {
           debugPrint('⚠️  Path exists but $exeName not found in: $savedPath');
-          invalidTools.add(toolName);
-
-          // Try auto-fix
-          final fixAttempted =
-              await _tryAutoFixInvalidPath(toolName.toLowerCase());
-          if (!fixAttempted) {
-            // Clear path if can't fix
-            if (toolName == 'FFmpeg') {
-              _ffmpegPath = '';
-              _isFFmpegAvailable = false;
-            } else if (toolName == 'mkvpropedit') {
-              _mkvpropeditPath = '';
-              _isMkvpropeditAvailable = false;
-            } else if (toolName == 'AtomicParsley') {
-              _atomicparsleyPath = '';
-              _isAtomicParsleyAvailable = false;
-            }
-            debugPrint('❌ Cleared invalid path for $toolName');
-          }
         }
+      } else {
+        debugPrint('⚠️  Saved path for $toolName no longer exists: $savedPath');
+      }
+
+      if (!pathInvalid) continue;
+      invalidTools.add(toolName);
+
+      if (await _tryAutoFixInvalidPath(toolName.toLowerCase())) {
+        fixedTools.add(toolName);
+        debugPrint('✅ Auto-fixed $toolName path');
+      } else {
+        _clearToolPath(toolName);
+        debugPrint('❌ Cleared invalid path for $toolName');
       }
     }
 
-    // Save if any paths were cleared or fixed
-    if (invalidTools.isNotEmpty) {
-      await _saveSettings();
-      debugPrint('💾 Saved updated tool paths');
-
-      // Log summary
-      if (fixedTools.isNotEmpty) {
-        debugPrint('✅ Auto-fixed tools: ${fixedTools.join(", ")}');
-      }
-
-      final stillInvalid =
-          invalidTools.where((t) => !fixedTools.contains(t)).toList();
-      if (stillInvalid.isNotEmpty) {
-        debugPrint(
-            '⚠️  Tools need reconfiguration: ${stillInvalid.join(", ")}');
-        debugPrint('   Please configure tools in Settings if needed');
-      }
-    } else {
+    if (invalidTools.isEmpty) {
       debugPrint('✅ All tool paths valid');
+      return;
+    }
+
+    await _saveSettings();
+    debugPrint('💾 Saved updated tool paths');
+    if (fixedTools.isNotEmpty) {
+      debugPrint('✅ Auto-fixed tools: ${fixedTools.join(", ")}');
+    }
+    final stillInvalid =
+        invalidTools.where((t) => !fixedTools.contains(t)).toList();
+    if (stillInvalid.isNotEmpty) {
+      debugPrint('⚠️  Tools need reconfiguration: ${stillInvalid.join(", ")}');
     }
   }
 
-  /// Try to auto-fix an invalid tool path by searching UserData/tools
-  Future<bool> _tryAutoFixInvalidPath(String toolName) async {
+  /// Search UserData/tools/<subdir> for `<toolName>.exe`, trying the install
+  /// root, a `bin/` subdirectory, then a full recursive scan. Returns the
+  /// directory containing the executable, or null.
+  Future<String?> _findToolInUserData(String toolName) async {
     try {
       final userDataPath = await _getUserDataPath();
-      final toolsDir = p.join(userDataPath, 'tools');
-
-      String subDir = '';
-      if (toolName == 'ffmpeg')
-        subDir = 'ffmpeg';
-      else if (toolName == 'mkvpropedit')
-        subDir = 'mkvtoolnix';
-      else if (toolName == 'atomicparsley') subDir = 'atomicparsley';
-
-      final subDirPath = p.join(toolsDir, subDir);
+      final subDirPath = p.join(
+        userDataPath,
+        'tools',
+        ToolConfig.getSubdirectory(toolName),
+      );
       final subDirectory = Directory(subDirPath);
+      if (!subDirectory.existsSync()) return null;
 
-      if (!subDirectory.existsSync()) return false;
-
-      // Find the executable
-      String? foundPath;
-
-      // 1. Direct
-      if (File(p.join(subDirPath, '$toolName.exe')).existsSync()) {
-        foundPath = subDirPath;
+      final exeName = '$toolName.exe';
+      if (File(p.join(subDirPath, exeName)).existsSync()) return subDirPath;
+      if (File(p.join(subDirPath, 'bin', exeName)).existsSync()) {
+        return p.join(subDirPath, 'bin');
       }
-      // 2. Bin
-      else if (File(p.join(subDirPath, 'bin', '$toolName.exe')).existsSync()) {
-        foundPath = p.join(subDirPath, 'bin');
-      }
-      // 3. Recursive
-      else {
-        try {
-          final entities = subDirectory.listSync(recursive: true);
-          for (var entity in entities) {
-            if (entity is File &&
-                p.basename(entity.path).toLowerCase() ==
-                    '$toolName.exe'.toLowerCase()) {
-              foundPath = p.dirname(entity.path);
-              break;
-            }
+
+      try {
+        for (final entity in subDirectory.listSync(recursive: true)) {
+          if (entity is File &&
+              p.basename(entity.path).toLowerCase() == exeName.toLowerCase()) {
+            return p.dirname(entity.path);
           }
-        } catch (_) {}
-      }
-
-      if (foundPath != null) {
-        if (toolName == 'ffmpeg') {
-          _ffmpegPath = foundPath;
-          _isFFmpegAvailable = true;
-        } else if (toolName == 'mkvpropedit') {
-          _mkvpropeditPath = foundPath;
-          _isMkvpropeditAvailable = true;
-        } else if (toolName == 'atomicparsley') {
-          _atomicparsleyPath = foundPath;
-          _isAtomicParsleyAvailable = true;
         }
-        return true;
-      }
+      } catch (_) {}
     } catch (e) {
-      debugPrint('Error trying to auto-fix $toolName: $e');
+      debugPrint('Error searching UserData for $toolName: $e');
+    }
+    return null;
+  }
+
+  /// Apply a discovered tool path to the matching settings field and mark it
+  /// available. Returns false if [toolName] is not recognised.
+  bool _applyFoundToolPath(String toolName, String foundPath) {
+    switch (toolName.toLowerCase()) {
+      case 'ffmpeg':
+        _ffmpegPath = foundPath;
+        _isFFmpegAvailable = true;
+        return true;
+      case 'mkvpropedit':
+        _mkvpropeditPath = foundPath;
+        _isMkvpropeditAvailable = true;
+        return true;
+      case 'atomicparsley':
+        _atomicparsleyPath = foundPath;
+        _isAtomicParsleyAvailable = true;
+        return true;
     }
     return false;
+  }
+
+  /// Try to auto-fix an invalid tool path by searching UserData/tools.
+  Future<bool> _tryAutoFixInvalidPath(String toolName) async {
+    final foundPath = await _findToolInUserData(toolName);
+    if (foundPath == null) return false;
+    return _applyFoundToolPath(toolName, foundPath);
   }
 
   Future<void> _saveSettings() async {
@@ -382,6 +377,9 @@ class SettingsService with ChangeNotifier {
         'atomicparsley_url': _atomicParsleyUrl,
         'lifetime_tv_shows_matched': _lifetimeTvShowsMatched,
         'lifetime_movies_matched': _lifetimeMoviesMatched,
+        'skipped_update_version': _skippedUpdateVersion,
+        if (_lastUpdateCheckAt != null)
+          'last_update_check_at': _lastUpdateCheckAt!.toIso8601String(),
       };
 
       const jsonEncoder = JsonEncoder.withIndent('  ');
@@ -506,6 +504,8 @@ class SettingsService with ChangeNotifier {
 
   Future<void> setFFmpegPath(String path) async {
     _ffmpegPath = path;
+    ToolResolver.invalidate('ffmpeg');
+    ToolResolver.invalidate('ffprobe');
     await _saveSettings();
     await checkToolAvailability();
     notifyListeners();
@@ -513,6 +513,7 @@ class SettingsService with ChangeNotifier {
 
   Future<void> setMkvpropeditPath(String path) async {
     _mkvpropeditPath = path;
+    ToolResolver.invalidate('mkvpropedit');
     await _saveSettings();
     await checkToolAvailability();
     notifyListeners();
@@ -520,6 +521,7 @@ class SettingsService with ChangeNotifier {
 
   Future<void> setAtomicParsleyPath(String path) async {
     _atomicparsleyPath = path;
+    ToolResolver.invalidate('AtomicParsley');
     await _saveSettings();
     await checkToolAvailability();
     notifyListeners();
@@ -563,6 +565,9 @@ class SettingsService with ChangeNotifier {
     _ffmpegPath = "";
     _mkvpropeditPath = "";
     _atomicparsleyPath = "";
+    _skippedUpdateVersion = "";
+    _lastUpdateCheckAt = null;
+    ToolResolver.clearCache();
     _ffmpegUrl =
         'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip';
     _mkvtoolnixUrl =
@@ -596,64 +601,11 @@ class SettingsService with ChangeNotifier {
   }
 
   Future<void> _tryAutoFixPath(String toolName) async {
-    try {
-      final userDataPath = await _getUserDataPath();
-      final toolsDir = p.join(userDataPath, 'tools');
-
-      String subDir = '';
-      if (toolName == 'ffmpeg')
-        subDir = 'ffmpeg';
-      else if (toolName == 'mkvpropedit')
-        subDir = 'mkvtoolnix';
-      else if (toolName == 'AtomicParsley') subDir = 'atomicparsley';
-
-      final subDirPath = p.join(toolsDir, subDir);
-      final subDirectory = Directory(subDirPath);
-
-      if (!subDirectory.existsSync()) return;
-
-      // Find the executable
-      String? foundPath;
-
-      // 1. Direct
-      if (File(p.join(subDirPath, '$toolName.exe')).existsSync()) {
-        foundPath = subDirPath;
-      }
-      // 2. Bin
-      else if (File(p.join(subDirPath, 'bin', '$toolName.exe')).existsSync()) {
-        foundPath = p.join(subDirPath, 'bin');
-      }
-      // 3. Recursive
-      else {
-        try {
-          final entities = subDirectory.listSync(recursive: true);
-          for (var entity in entities) {
-            if (entity is File &&
-                p.basename(entity.path).toLowerCase() ==
-                    '$toolName.exe'.toLowerCase()) {
-              foundPath = p.dirname(entity.path);
-              break;
-            }
-          }
-        } catch (_) {}
-      }
-
-      if (foundPath != null) {
-        debugPrint('✅ Auto-fixed path for $toolName: $foundPath');
-        if (toolName == 'ffmpeg') {
-          _ffmpegPath = foundPath;
-          _isFFmpegAvailable = true;
-        } else if (toolName == 'mkvpropedit') {
-          _mkvpropeditPath = foundPath;
-          _isMkvpropeditAvailable = true;
-        } else if (toolName == 'AtomicParsley') {
-          _atomicparsleyPath = foundPath;
-          _isAtomicParsleyAvailable = true;
-        }
-        await _saveSettings();
-      }
-    } catch (e) {
-      debugPrint('Auto-fix failed for $toolName: $e');
+    final foundPath = await _findToolInUserData(toolName);
+    if (foundPath == null) return;
+    if (_applyFoundToolPath(toolName, foundPath)) {
+      debugPrint('✅ Auto-fixed path for $toolName: $foundPath');
+      await _saveSettings();
     }
   }
 
@@ -755,5 +707,21 @@ class SettingsService with ChangeNotifier {
     _lifetimeMoviesMatched += count;
     await _saveSettings();
     notifyListeners();
+  }
+
+  /// Mark a specific update version as "do not pester me about this one
+  /// again." The banner is suppressed until a strictly newer version ships.
+  Future<void> setSkippedUpdateVersion(String version) async {
+    _skippedUpdateVersion = version;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  /// Record the timestamp of the most recent update check. Used to throttle
+  /// the silent background check on app startup.
+  Future<void> setLastUpdateCheckAt(DateTime when) async {
+    _lastUpdateCheckAt = when;
+    await _saveSettings();
+    // No notifyListeners — this is a background bookkeeping detail.
   }
 }
