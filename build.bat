@@ -1,5 +1,6 @@
 @echo off
 setlocal
+cd /d "%~dp0"
 
 echo ==========================================
 echo    MyMeta - Build Script
@@ -68,7 +69,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [3/3] Building Windows Release...
-call flutter build windows --release
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0build-release.ps1" -KeepBuild
 
 if %errorlevel% neq 0 (
     echo.
@@ -105,7 +106,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [4/4] Building Windows Release...
-call flutter build windows --release
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0build-release.ps1" -KeepBuild
 
 if %errorlevel% neq 0 (
     echo.
@@ -150,23 +151,11 @@ goto end
 
 :show_success
 echo.
-echo ==========================================
-echo    Build Successful!
-echo ==========================================
-echo.
-echo The executable is located at:
-echo build\windows\x64\runner\Release\MyMeta.exe
-echo.
-echo File size:
-dir build\windows\x64\runner\Release\MyMeta.exe | find "MyMeta.exe"
-echo.
-echo NOTE: Third-party tools (FFmpeg, MKVToolNix, AtomicParsley)
-echo are downloaded on first run via the in-app Setup dialog.
-echo.
-echo To distribute:
-echo   1. Test build\windows\x64\runner\Release\MyMeta.exe
-echo   2. Package the entire Release folder as ZIP
-echo   3. Users can extract and run MyMeta.exe
+echo Release build and ZIP verification passed.
+echo See the releases folder for the ZIP and unpacked MyMeta folder.
+echo Each release ZIP includes a source folder.
+
+echo NOTE: Third-party tools are downloaded via the in-app Setup dialog.
 echo.
 pause
 

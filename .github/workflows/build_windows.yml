@@ -1,38 +1,37 @@
-name: Build Windows App
+name: Build Windows release
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [main, master]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [main, master]
   workflow_dispatch:
 
-jobs:
-  build:
-    runs-on: windows-latest
+permissions:
+  contents: read
 
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          flutter-version: '3.47.8'
+          channel: stable
           cache: true
 
-      - name: Enable Desktop Support
-        run: flutter config --enable-windows-desktop
+      - name: Build and verify the Windows release
+        shell: powershell
+        run: ./build-release.ps1
 
-      - name: Get Dependencies
-        run: flutter pub get
-
-      - name: Build Windows Release with PowerShell Script
-        run: .\build-release.ps1
-        shell: pwsh
-
-      - name: Upload Artifact
+      - name: Upload the verified release
         uses: actions/upload-artifact@v4
         with:
-          name: windows-release-build
-          path: releases/*.zip
+          name: MyMeta-Windows-release
+          path: |
+            releases/*.zip
+          if-no-files-found: error
